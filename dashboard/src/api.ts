@@ -1,0 +1,100 @@
+// Thin client for the clanker HTTP API. Reads its base URL and bearer token
+// from localStorage so the Settings view can change them at runtime without
+// rebuilding. Falls back to VITE_API_URL when set at build time.
+
+const URL_KEY = "clanker.apiUrl";
+const TOKEN_KEY = "clanker.apiToken";
+
+export function getApiUrl(): string {
+  const stored = localStorage.getItem(URL_KEY);
+  if (stored) return stored;
+  const buildTime = import.meta.env.VITE_API_URL as string | undefined;
+  return buildTime ?? "http://127.0.0.1:8080";
+}
+
+export function getApiToken(): string {
+  return localStorage.getItem(TOKEN_KEY) ?? "";
+}
+
+export function setApiUrl(value: string) {
+  localStorage.setItem(URL_KEY, value);
+}
+
+export function setApiToken(value: string) {
+  localStorage.setItem(TOKEN_KEY, value);
+}
+
+export type ApiResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; status: number; code: string; message: string };
+
+async function call<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
+  const url = getApiUrl().replace(/\/$/, "") + path;
+  const headers = new Headers(init?.headers);
+  const token = getApiToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  headers.set("Accept", "application/json");
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, { ...init, headers });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "network error";
+    return { ok: false, status: 0, code: "network", message: msg };
+  }
+
+  let body: unknown;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
+  if (!resp.ok) {
+    const err = (body as { error?: { code?: string; message?: string } })?.error;
+    return {
+      ok: false,
+      status: resp.status,
+      code: err?.code ?? "http_error",
+      message: err?.message ?? resp.statusText,
+    };
+  }
+  const data = (body as { data: T })?.data;
+  return { ok: true, data };
+}
+
+export function getHealth() {
+  return call<{ ok: boolean; uptime: string }>("/api/v1/health");
+}
+
+export function getVersion() {
+  return call<{ version: string }>("/api/v1/version");
+}
+
+export function getRegions() {
+  return call<string[]>("/api/v1/tencent/regions");
+}
+
+export function getResources(type: string, region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<Record<string, unknown>[]>(
+    `/api/v1/tencent/resources/${encodeURIComponent(type)}${q}`,
+  );
+}
+
+export type SGRule = {
+  direction: string;
+  index: number;
+  protocol?: string;
+  port?: string;
+  source?: string;
+  action: string;
+  description?: string;
+  risk?: string;
+};
+
+export function getSGRules(sgId: string, region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<{ sg_id: string; region: string; rules: SGRule[]; risky_count: number }>(
+    `/api/v1/tencent/sg-rules/${encodeURIComponent(sgId)}${q}`,
+  );
+}
