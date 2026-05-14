@@ -10,46 +10,70 @@ import (
 	cvm "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm/v20170312"
 )
 
-// listCVM prints every CVM instance in the client's region.
-func listCVM(c *Client) error {
-	client, err := c.CVM()
-	if err != nil {
-		return fmt.Errorf("init cvm client: %w", err)
+// listCVM prints every CVM instance across the given regions. When more than
+// one region is supplied a REGION column is added.
+func listCVM(c *Client, regions []string) error {
+	multi := len(regions) > 1
+
+	type row struct {
+		region string
+		inst   *cvm.Instance
 	}
+	var rows []row
+	var warnings []string
 
-	req := cvm.NewDescribeInstancesRequest()
-	var offset, limit int64 = 0, 100
-	req.Offset = &offset
-	req.Limit = &limit
-
-	var collected []*cvm.Instance
-	for {
-		resp, err := client.DescribeInstances(req)
+	for _, r := range regions {
+		rc := c.WithRegion(r)
+		client, err := rc.CVM()
 		if err != nil {
-			return fmt.Errorf("DescribeInstances: %w", friendlyError(err))
+			warnings = append(warnings, fmt.Sprintf("%s: init cvm client: %v", r, err))
+			continue
 		}
-		if resp == nil || resp.Response == nil {
-			break
-		}
-		collected = append(collected, resp.Response.InstanceSet...)
-		total := derefInt64(resp.Response.TotalCount)
-		offset += int64(len(resp.Response.InstanceSet))
-		if int64(len(collected)) >= total || len(resp.Response.InstanceSet) == 0 {
-			break
-		}
+		req := cvm.NewDescribeInstancesRequest()
+		var offset, limit int64 = 0, 100
 		req.Offset = &offset
+		req.Limit = &limit
+		for {
+			resp, err := client.DescribeInstances(req)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s: %v", r, friendlyError(err)))
+				break
+			}
+			if resp == nil || resp.Response == nil {
+				break
+			}
+			for _, inst := range resp.Response.InstanceSet {
+				rows = append(rows, row{region: r, inst: inst})
+			}
+			total := derefInt64(resp.Response.TotalCount)
+			offset += int64(len(resp.Response.InstanceSet))
+			if offset >= total || len(resp.Response.InstanceSet) == 0 {
+				break
+			}
+			req.Offset = &offset
+		}
 	}
 
-	fmt.Printf("Tencent Cloud CVM Instances (region=%s):\n\n", c.Region())
-	if len(collected) == 0 {
+	header := fmt.Sprintf("Tencent Cloud CVM Instances (region=%s)", c.Region())
+	if multi {
+		header = fmt.Sprintf("Tencent Cloud CVM Instances (regions=%d)", len(regions))
+	}
+	fmt.Printf("%s:\n\n", header)
+	if len(rows) == 0 {
 		fmt.Println("  No CVM instances found")
+		printWarnings(warnings)
 		return nil
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "INSTANCE_ID\tNAME\tSTATE\tTYPE\tPRIVATE_IP\tPUBLIC_IP\tZONE\tCREATED")
-	for _, inst := range collected {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+	if multi {
+		fmt.Fprintln(tw, "REGION\tINSTANCE_ID\tNAME\tSTATE\tTYPE\tPRIVATE_IP\tPUBLIC_IP\tZONE\tCREATED")
+	} else {
+		fmt.Fprintln(tw, "INSTANCE_ID\tNAME\tSTATE\tTYPE\tPRIVATE_IP\tPUBLIC_IP\tZONE\tCREATED")
+	}
+	for _, r := range rows {
+		inst := r.inst
+		fields := []string{
 			derefString(inst.InstanceId),
 			derefString(inst.InstanceName),
 			derefString(inst.InstanceState),
@@ -58,9 +82,29 @@ func listCVM(c *Client) error {
 			joinIPs(inst.PublicIpAddresses),
 			derefString(inst.Placement.Zone),
 			derefString(inst.CreatedTime),
-		)
+		}
+		if multi {
+			fmt.Fprintln(tw, r.region+"\t"+strings.Join(fields, "\t"))
+		} else {
+			fmt.Fprintln(tw, strings.Join(fields, "\t"))
+		}
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	printWarnings(warnings)
+	return nil
+}
+
+func printWarnings(warns []string) {
+	if len(warns) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Warnings:")
+	for _, w := range warns {
+		fmt.Fprintln(os.Stderr, "  -", w)
+	}
 }
 
 func joinIPs(ptrs []*string) string {

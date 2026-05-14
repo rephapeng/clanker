@@ -66,6 +66,47 @@ func NewClient(creds Credentials, debug bool) (*Client, error) {
 // Region returns the region this client is targeting.
 func (c *Client) Region() string { return c.creds.Region }
 
+// WithRegion returns a shallow copy of the client scoped to a different region.
+// Used by --all-regions fan-out so each region call gets its own SDK client.
+func (c *Client) WithRegion(region string) *Client {
+	clone := *c
+	clone.creds.Region = strings.TrimSpace(region)
+	if clone.creds.Region == "" {
+		clone.creds.Region = defaultRegion
+	}
+	return &clone
+}
+
+// ListAllRegions queries Tencent for the full set of CVM regions available to
+// this credential. The CVM service is used because every region exposes it and
+// the API call is cheap.
+func (c *Client) ListAllRegions() ([]string, error) {
+	cli, err := c.CVM()
+	if err != nil {
+		return nil, fmt.Errorf("init cvm client for regions: %w", err)
+	}
+	req := cvm.NewDescribeRegionsRequest()
+	resp, err := cli.DescribeRegions(req)
+	if err != nil {
+		return nil, fmt.Errorf("DescribeRegions: %w", friendlyError(err))
+	}
+	if resp == nil || resp.Response == nil {
+		return nil, nil
+	}
+	var out []string
+	for _, r := range resp.Response.RegionSet {
+		if r == nil || r.Region == nil {
+			continue
+		}
+		// Skip regions in non-available state (e.g. UNAVAILABLE = closed for new accounts).
+		if r.RegionState != nil && strings.EqualFold(*r.RegionState, "UNAVAILABLE") {
+			continue
+		}
+		out = append(out, *r.Region)
+	}
+	return out, nil
+}
+
 // CVM returns a region-scoped CVM SDK client.
 func (c *Client) CVM() (*cvm.Client, error) {
 	cred := common.NewCredential(c.creds.SecretID, c.creds.SecretKey)
