@@ -31,9 +31,12 @@ require (
 	github.com/mark3labs/mcp-go v0.46.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb v1.3.94
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.97
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.89
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/postgres v1.3.89
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.3.83
+	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
 	golang.org/x/crypto v0.49.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
@@ -70,6 +73,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.21.5 // indirect
 	github.com/aws/smithy-go v1.24.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/clbanning/mxj v1.8.4 // indirect
 	github.com/cncf/xds/go v0.0.0-20251210132809-ee656c7534f5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.36.0 // indirect
@@ -97,6 +101,7 @@ require (
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
+	github.com/mozillazg/go-httpheader v0.2.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.1.0 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect

@@ -31,8 +31,12 @@ Supported resources:
   vpc, vpcs                   - Virtual Private Clouds
   subnets, subnet             - VPC subnets
   security-groups, sg, sgs    - Security Groups
+  mysql, cdb                  - TencentDB for MySQL instances
+  postgres, pg, postgresql    - TencentDB for PostgreSQL instances
+  cos, buckets                - COS object storage buckets (service-global)
 
-Use --all-regions to fan out across every available region.`,
+Use --all-regions to fan out across every available region (does not apply
+to cos, which uses a service-global endpoint).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resourceType := strings.ToLower(strings.TrimSpace(args[0]))
@@ -71,8 +75,14 @@ Use --all-regions to fan out across every available region.`,
 				return listSubnets(client, regions)
 			case "sg", "sgs", "security-group", "security-groups":
 				return listSecurityGroups(client, regions)
+			case "mysql", "cdb":
+				return listMySQL(client, regions)
+			case "postgres", "postgresql", "pg":
+				return listPostgres(client, regions)
+			case "cos", "bucket", "buckets":
+				return listCOSBuckets(client)
 			default:
-				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups)", resourceType)
+				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos)", resourceType)
 			}
 		},
 	}
