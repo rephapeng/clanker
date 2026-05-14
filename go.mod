@@ -31,6 +31,9 @@ require (
 	github.com/mark3labs/mcp-go v0.46.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.97
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.89
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.3.83
 	golang.org/x/crypto v0.49.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
