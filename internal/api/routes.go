@@ -1,0 +1,185 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/bgdnvk/clanker/internal/tencent"
+)
+
+func (s *Server) registerRoutes() {
+	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/v1/version", s.handleVersion)
+
+	// Tencent read endpoints
+	s.mux.HandleFunc("GET /api/v1/tencent/regions", s.handleTencentRegions)
+	s.mux.HandleFunc("GET /api/v1/tencent/resources/{type}", s.handleTencentResources)
+	s.mux.HandleFunc("GET /api/v1/tencent/sg-rules/{id}", s.handleTencentSGRules)
+	s.mux.HandleFunc("GET /api/v1/tencent/kubeconfig/{cluster_id}", s.handleTencentKubeconfig)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeData(w, map[string]interface{}{
+		"ok":     true,
+		"uptime": time.Since(s.started).Round(time.Second).String(),
+	})
+}
+
+// Version is wired by cmd/server.go via SetVersion so we don't import cmd here
+// and create a cycle.
+var serverVersion = "dev"
+
+// SetVersion sets the version string returned by the /api/v1/version endpoint.
+// Called once from cmd/server.go after main() initialises cmd.Version.
+func SetVersion(v string) { serverVersion = v }
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	writeData(w, map[string]string{"version": serverVersion})
+}
+
+func (s *Server) handleTencentRegions(w http.ResponseWriter, r *http.Request) {
+	client, err := s.tencentClient(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "tencent_credentials", err.Error())
+		return
+	}
+	regions, err := client.ListAllRegions()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "tencent_api_error", err.Error())
+		return
+	}
+	writeData(w, regions)
+}
+
+func (s *Server) handleTencentResources(w http.ResponseWriter, r *http.Request) {
+	resourceType := strings.ToLower(strings.TrimSpace(r.PathValue("type")))
+	if resourceType == "" {
+		writeError(w, http.StatusBadRequest, "missing_param", "resource type is required")
+		return
+	}
+
+	client, err := s.tencentClient(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "tencent_credentials", err.Error())
+		return
+	}
+
+	// We reuse context.go's JSON gather funcs since they already emit the
+	// shape we want to return. Each function targets the client's current
+	// region; multi-region fan-out for HTTP is a future enhancement.
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	question := strings.ToLower(resourceType) // makes context.go pick the right section
+	raw, err := client.GetRelevantContext(ctx, question)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "tencent_api_error", err.Error())
+		return
+	}
+	// GetRelevantContext returns multi-section text; for an HTTP endpoint
+	// we want a single-typed JSON answer. Strip the wrapper text and parse
+	// just the requested section. Simpler approach: call the typed gather
+	// directly.
+	body, err := gatherTencentByType(ctx, client, resourceType)
+	if err != nil {
+		// Fallback to the multi-section text if typed gather fails.
+		writeData(w, map[string]string{"raw": raw, "warning": err.Error()})
+		return
+	}
+	if strings.TrimSpace(body) == "" {
+		writeData(w, []interface{}{})
+		return
+	}
+	writeRawData(w, body)
+}
+
+// gatherTencentByType returns a typed JSON section (already JSON-encoded) for
+// the given resource type. Returns "" with no error when the type matches but
+// no resources exist; an error when the type is unsupported or the SDK call
+// fails.
+func gatherTencentByType(ctx context.Context, client *tencent.Client, resourceType string) (string, error) {
+	switch resourceType {
+	case "cvm", "instance", "instances":
+		return client.JSONCVMs(ctx)
+	case "vpc", "vpcs":
+		return client.JSONVPCs(ctx)
+	case "sg", "sgs", "security-group", "security-groups":
+		return client.JSONSecurityGroups(ctx)
+	case "mysql", "cdb":
+		return client.JSONMySQL(ctx)
+	case "postgres", "postgresql", "pg":
+		return client.JSONPostgres(ctx)
+	case "cos", "buckets", "bucket":
+		return client.JSONCOS(ctx)
+	case "tke", "k8s", "clusters", "kubernetes":
+		return client.JSONTKE(ctx)
+	default:
+		return "", fmt.Errorf("unsupported resource type %q", resourceType)
+	}
+}
+
+func (s *Server) handleTencentSGRules(w http.ResponseWriter, r *http.Request) {
+	sgID := strings.TrimSpace(r.PathValue("id"))
+	if sgID == "" {
+		writeError(w, http.StatusBadRequest, "missing_param", "sg id is required")
+		return
+	}
+	client, err := s.tencentClient(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "tencent_credentials", err.Error())
+		return
+	}
+	body, err := client.JSONSGRules(r.Context(), sgID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "tencent_api_error", err.Error())
+		return
+	}
+	writeRawData(w, body)
+}
+
+func (s *Server) handleTencentKubeconfig(w http.ResponseWriter, r *http.Request) {
+	clusterID := strings.TrimSpace(r.PathValue("cluster_id"))
+	if clusterID == "" {
+		writeError(w, http.StatusBadRequest, "missing_param", "cluster_id is required")
+		return
+	}
+	publicEndpoint := strings.EqualFold(r.URL.Query().Get("public"), "true")
+	client, err := s.tencentClient(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "tencent_credentials", err.Error())
+		return
+	}
+	kc, err := client.FetchKubeconfig(r.Context(), clusterID, publicEndpoint)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "tencent_api_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"data": map[string]string{
+			"cluster_id": clusterID,
+			"kubeconfig": kc,
+		},
+	})
+}
+
+// tencentClient builds a Tencent client for this request. The region can be
+// overridden per request via ?region=ap-jakarta; otherwise the daemon's
+// default (resolved from config / env at startup) is used.
+func (s *Server) tencentClient(r *http.Request) (*tencent.Client, error) {
+	creds := tencent.ResolveCredentials()
+	if region := strings.TrimSpace(r.URL.Query().Get("region")); region != "" {
+		creds.Region = region
+	}
+	return tencent.NewClient(creds, s.cfg.Debug)
+}
+
+// jsonValid is used by tests to assert that an internal JSON payload is
+// well-formed; kept here so handlers and tests share one definition.
+func jsonValid(s string) bool {
+	var v interface{}
+	return json.Unmarshal([]byte(s), &v) == nil
+}

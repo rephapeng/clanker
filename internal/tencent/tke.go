@@ -118,6 +118,16 @@ func getTKEKubeconfig(c *Client, clusterID string, public bool) error {
 	return nil
 }
 
+// newDescribeKubeconfigReq builds a TKE DescribeClusterKubeconfig request.
+// Extracted so both the CLI command and the HTTP API layer can share the
+// construction without exporting an SDK request type from this package.
+func newDescribeKubeconfigReq(clusterID string, public bool) *tke.DescribeClusterKubeconfigRequest {
+	req := tke.NewDescribeClusterKubeconfigRequest()
+	req.ClusterId = &clusterID
+	req.IsExtranet = &public
+	return req
+}
+
 func newTKEClient(c *Client, region string) (*tke.Client, error) {
 	if strings.TrimSpace(region) == "" {
 		region = c.creds.Region
