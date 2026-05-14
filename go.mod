@@ -35,6 +35,7 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.97
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.89
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/postgres v1.3.89
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tke v1.3.86
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.3.83
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
 	golang.org/x/crypto v0.49.0

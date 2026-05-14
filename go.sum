@@ -289,6 +289,7 @@ github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb v1.3.94 h1:OW9fV8GI
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb v1.3.94/go.mod h1:v5cDZ49IfyHIC9DLTWVFCE7UXBSO9Hbk9NEw5/90LEw=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.563/go.mod h1:7sCQWVkxcsR38nffDW057DRGk8mUjK1Ing/EFOK8s8Y=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.83/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.86/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.89/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.94/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.97 h1:pohADysUIGHOMXymXnMNyyfJKy0iHjnBHoSQ3GO0UAM=
@@ -298,6 +299,8 @@ github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.89/go.mod h1:6
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/kms v1.0.563/go.mod h1:uom4Nvi9W+Qkom0exYiJ9VWJjXwyxtPYTkKkaLMlfE0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/postgres v1.3.89 h1:4HdSGx6XJb0/HVLKzWp7YdqvdeiISPAYsMjL9IJaXPI=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/postgres v1.3.89/go.mod h1:7JNIsh6G2GmRhPIYUM4Sa/x1t57cWIBAempwHoMDMp4=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tke v1.3.86 h1:vTpLGPpzAbZHOv0F6hmy8C9IBwJIUfhTrXH0vi7eiGA=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tke v1.3.86/go.mod h1:WLYwnfkYAsDBubUQmjKLN9wg+e0UeNVyILL3c46RcbE=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.3.83 h1:ie9YH+k8r+pgZMmexGHPQVxpqjqHqb6aNLwEQ0grnWQ=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.3.83/go.mod h1:YEf1XryuGZaXip8sc2zUzFn2H81aIOqh2I7vBlEXVFk=
 github.com/tencentyun/cos-go-sdk-v5 v0.7.73 h1:uFfgp1A7cQaAGR6QP9DsIkoEQ67b8ewj5r1RV6XB540=

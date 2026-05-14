@@ -34,6 +34,7 @@ Supported resources:
   mysql, cdb                  - TencentDB for MySQL instances
   postgres, pg, postgresql    - TencentDB for PostgreSQL instances
   cos, buckets                - COS object storage buckets (service-global)
+  tke, k8s, clusters          - TKE (Tencent Kubernetes Engine) clusters
 
 Use --all-regions to fan out across every available region (does not apply
 to cos, which uses a service-global endpoint).`,
@@ -81,8 +82,10 @@ to cos, which uses a service-global endpoint).`,
 				return listPostgres(client, regions)
 			case "cos", "bucket", "buckets":
 				return listCOSBuckets(client)
+			case "tke", "k8s", "cluster", "clusters", "kubernetes":
+				return listTKEClusters(client, regions)
 			default:
-				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos)", resourceType)
+				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke)", resourceType)
 			}
 		},
 	}
@@ -136,8 +139,40 @@ port (22, 3306, 3389, 5432, 6379, 9200, 27017).`,
 		},
 	}
 
+	var kubeconfigPublic bool
+	kubeconfigCmd := &cobra.Command{
+		Use:   "kubeconfig [cluster-id]",
+		Short: "Fetch a kubeconfig for a TKE cluster",
+		Long: `Fetch a kubeconfig YAML for a TKE cluster and print it on stdout.
+Pipe it into a file or kubectl directly:
+
+  clanker tencent kubeconfig cls-xxxxxx --region ap-singapore > ~/.kube/tencent
+  KUBECONFIG=~/.kube/tencent kubectl get nodes
+
+Defaults to the private (VPC-internal) endpoint. Use --public for the
+externally-routable endpoint when running from outside the cluster's VPC.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clusterID := strings.TrimSpace(args[0])
+			if clusterID == "" {
+				return fmt.Errorf("cluster id is required")
+			}
+			creds := ResolveCredentials()
+			if region != "" {
+				creds.Region = region
+			}
+			client, err := NewClient(creds, viper.GetBool("debug"))
+			if err != nil {
+				return err
+			}
+			return getTKEKubeconfig(client, clusterID, kubeconfigPublic)
+		},
+	}
+	kubeconfigCmd.Flags().BoolVar(&kubeconfigPublic, "public", false, "Fetch the public (extranet) kubeconfig instead of the VPC-internal one")
+
 	tencentCmd.AddCommand(listCmd)
 	tencentCmd.AddCommand(regionsCmd)
 	tencentCmd.AddCommand(sgRulesCmd)
+	tencentCmd.AddCommand(kubeconfigCmd)
 	return tencentCmd
 }

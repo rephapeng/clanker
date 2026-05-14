@@ -11,6 +11,7 @@ import (
 	cdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb/v20170320"
 	cvm "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm/v20170312"
 	postgres "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/postgres/v20170312"
+	tke "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tke/v20180525"
 	vpc "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc/v20170312"
 	cos "github.com/tencentyun/cos-go-sdk-v5"
 )
@@ -61,6 +62,11 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 			name: "COSBuckets",
 			keys: []string{"cos", "bucket", "buckets", "storage", "object", "s3"},
 			run:  func() (string, error) { return c.contextCOS(ctx) },
+		},
+		{
+			name: "TKEClusters",
+			keys: []string{"tke", "kubernetes", "k8s", "cluster", "clusters", "pod", "node"},
+			run:  func() (string, error) { return c.contextTKE(ctx) },
 		},
 	}
 
@@ -369,6 +375,56 @@ func (c *Client) contextCOS(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+func (c *Client) contextTKE(ctx context.Context) (string, error) {
+	client, err := newTKEClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	req := tke.NewDescribeClustersRequest()
+	var offset, limit int64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeClusters(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.Clusters) == 0 {
+		return "", nil
+	}
+	type tkeSummary struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Status   string `json:"status"`
+		Version  string `json:"k8s_version"`
+		Type     string `json:"type"`
+		NodeNum  uint64 `json:"node_num,omitempty"`
+		VpcID    string `json:"vpc_id,omitempty"`
+		Created  string `json:"created_at,omitempty"`
+	}
+	var slim []tkeSummary
+	for _, cl := range resp.Response.Clusters {
+		vpcID := ""
+		if cl.ClusterNetworkSettings != nil && cl.ClusterNetworkSettings.VpcId != nil {
+			vpcID = *cl.ClusterNetworkSettings.VpcId
+		}
+		slim = append(slim, tkeSummary{
+			ID:      derefStringRaw(cl.ClusterId),
+			Name:    derefStringRaw(cl.ClusterName),
+			Status:  derefStringRaw(cl.ClusterStatus),
+			Version: derefStringRaw(cl.ClusterVersion),
+			Type:    derefStringRaw(cl.ClusterType),
+			NodeNum: derefUint64Raw(cl.ClusterNodeNum),
+			VpcID:   vpcID,
+			Created: derefStringRaw(cl.CreatedTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 func derefInt64Raw(p *int64) int64 {
