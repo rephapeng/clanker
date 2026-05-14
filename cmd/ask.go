@@ -23,6 +23,7 @@ import (
 	cfzerotrust "github.com/bgdnvk/clanker/internal/cloudflare/zerotrust"
 	"github.com/bgdnvk/clanker/internal/dbcontext"
 	"github.com/bgdnvk/clanker/internal/digitalocean"
+	"github.com/bgdnvk/clanker/internal/tencent"
 	"github.com/bgdnvk/clanker/internal/flyio"
 	"github.com/bgdnvk/clanker/internal/gcp"
 	ghclient "github.com/bgdnvk/clanker/internal/github"
@@ -118,6 +119,7 @@ Examples:
 		includeFlyio, _ := cmd.Flags().GetBool("flyio")
 		includeRailway, _ := cmd.Flags().GetBool("railway")
 		includeVerda, _ := cmd.Flags().GetBool("verda")
+		includeTencent, _ := cmd.Flags().GetBool("tencent")
 		sreMode, _ := cmd.Flags().GetBool("sre")
 		includeTerraform, _ := cmd.Flags().GetBool("terraform")
 		includeIAM, _ := cmd.Flags().GetBool("iam")
@@ -847,6 +849,11 @@ Format as a professional compliance table suitable for government security docum
 			return handleVerdaQuery(cmd.Context(), question, debug)
 		}
 
+		// Handle explicit --tencent flag
+		if includeTencent && !makerMode {
+			return handleTencentQuery(context.Background(), question, debug)
+		}
+
 		if !includeAWS && !includeGitHub && !includeTerraform && !includeGCP && !includeAzure && !includeCloudflare && !includeDigitalOcean && !includeHetzner && !includeVercel && !includeFlyio && !includeRailway && !includeVerda && !includeDB {
 			routingQuestion := questionForRouting(question)
 
@@ -1425,6 +1432,7 @@ func init() {
 	askCmd.Flags().Bool("flyio", false, "Include Fly.io context")
 	askCmd.Flags().Bool("railway", false, "Include Railway context")
 	askCmd.Flags().Bool("verda", false, "Include Verda Cloud (GPU/AI) infrastructure context")
+	askCmd.Flags().Bool("tencent", false, "Include Tencent Cloud infrastructure context")
 	askCmd.Flags().Bool("sre", false, "Use adaptive Clanker SRE discovery context")
 	askCmd.Flags().Bool("github", false, "Include GitHub repository context")
 	askCmd.Flags().Bool("cicd", false, "Include CI/CD context (currently GitHub Actions)")
@@ -2248,6 +2256,68 @@ Digital Ocean Context:
 User Question: %s
 
 Provide a clear, concise answer based on the data above. If the data doesn't contain enough information to fully answer the question, say so and suggest what additional information might be needed.`, doContext, question)
+
+	response, err := aiClient.AskPrompt(ctx, prompt)
+	if err != nil {
+		return fmt.Errorf("failed to get AI response: %w", err)
+	}
+
+	fmt.Println(response)
+	return nil
+}
+
+// handleTencentQuery delegates a Tencent Cloud query to the tencent client.
+// Mirrors handleDigitalOceanQuery: gather relevant context from the SDK,
+// stuff it into the prompt, hand to the configured AI provider.
+func handleTencentQuery(ctx context.Context, question string, debug bool) error {
+	if debug {
+		fmt.Println("Delegating query to Tencent Cloud agent...")
+	}
+
+	creds := tencent.ResolveCredentials()
+	client, err := tencent.NewClient(creds, debug)
+	if err != nil {
+		return err
+	}
+
+	tcContext, err := client.GetRelevantContext(ctx, question)
+	if err != nil {
+		return fmt.Errorf("failed to get Tencent Cloud context: %w", err)
+	}
+
+	provider := viper.GetString("ai.default_provider")
+	if provider == "" {
+		provider = "openai"
+	}
+
+	var apiKey string
+	switch provider {
+	case "gemini", "gemini-api":
+		apiKey = ""
+	case "openai":
+		apiKey = resolveOpenAIKey("")
+	case "anthropic":
+		apiKey = resolveAnthropicKey("")
+	case "cohere":
+		apiKey = resolveCohereKey("")
+	case "deepseek":
+		apiKey = resolveDeepSeekKey("")
+	case "minimax":
+		apiKey = resolveMiniMaxKey("")
+	default:
+		apiKey = viper.GetString("ai.api_key")
+	}
+
+	aiClient := ai.NewClient(provider, apiKey, debug, provider)
+
+	prompt := fmt.Sprintf(`You are a Tencent Cloud infrastructure expert. Answer the user's question using the inventory data below. Tencent service abbreviations: CVM=Cloud Virtual Machine, VPC=Virtual Private Cloud, SG=Security Group, COS=Cloud Object Storage, CLB=Cloud Load Balancer, TKE=Tencent Kubernetes Engine, CDB=TencentDB for MySQL.
+
+Tencent Cloud Context:
+%s
+
+User Question: %s
+
+Provide a clear, concise answer based on the data above. Cite specific resource IDs (ins-*, vpc-*, sg-*) when relevant. If the data is insufficient, say what is missing and suggest the specific clanker subcommand that would surface it (e.g. clanker tencent list cvm --all-regions, clanker tencent sg-rules <sg-id>).`, tcContext, question)
 
 	response, err := aiClient.AskPrompt(ctx, prompt)
 	if err != nil {
