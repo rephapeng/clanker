@@ -9,7 +9,7 @@ export function getApiUrl(): string {
   const stored = localStorage.getItem(URL_KEY);
   if (stored) return stored;
   const buildTime = import.meta.env.VITE_API_URL as string | undefined;
-  return buildTime ?? "http://127.0.0.1:8080";
+  return buildTime ?? "http://127.0.0.1:47180";
 }
 
 export function getApiToken(): string {
@@ -97,4 +97,20 @@ export function getSGRules(sgId: string, region: string) {
   return call<{ sg_id: string; region: string; rules: SGRule[]; risky_count: number }>(
     `/api/v1/tencent/sg-rules/${encodeURIComponent(sgId)}${q}`,
   );
+}
+
+export type ApplyResult = {
+  provider: string;
+  status: "ok" | "error";
+  output: string;
+  error?: string;
+  duration: string;
+};
+
+export function applyPlan(plan: unknown, destroyer: boolean) {
+  return call<ApplyResult>("/api/v1/maker/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider: "tencent", plan, destroyer }),
+  });
 }
