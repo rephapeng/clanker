@@ -386,6 +386,21 @@ Examples:
 				})
 			}
 
+			if strings.EqualFold(strings.TrimSpace(makerPlan.Provider), "tencent") {
+				tcCreds := tencent.ResolveCredentials()
+				if tcCreds.SecretID == "" || tcCreds.SecretKey == "" {
+					return fmt.Errorf("tencent credentials are required for --apply (set tencent.secret_id / tencent.secret_key, TENCENTCLOUD_SECRET_ID / TENCENTCLOUD_SECRET_KEY, or TENCENT_SECRET_ID / TENCENT_SECRET_KEY)")
+				}
+				return maker.ExecuteTencentPlan(ctx, makerPlan, maker.ExecOptions{
+					TencentSecretID:  tcCreds.SecretID,
+					TencentSecretKey: tcCreds.SecretKey,
+					TencentRegion:    tcCreds.Region,
+					Writer:           os.Stdout,
+					Destroyer:        destroyer,
+					Debug:            debug,
+				})
+			}
+
 			// Resolve AWS profile/region for execution.
 			targetProfile := resolveAWSProfile(profile)
 
@@ -523,6 +538,7 @@ Examples:
 			explicitVercel := cmd.Flags().Changed("vercel") && includeVercel
 			explicitRailway := cmd.Flags().Changed("railway") && includeRailway
 			explicitVerda := cmd.Flags().Changed("verda") && includeVerda
+			explicitTencent := cmd.Flags().Changed("tencent") && includeTencent
 			explicitCount := 0
 			if explicitGCP {
 				explicitCount++
@@ -551,8 +567,11 @@ Examples:
 			if explicitVerda {
 				explicitCount++
 			}
+			if explicitTencent {
+				explicitCount++
+			}
 			if explicitCount > 1 {
-				return fmt.Errorf("cannot use multiple provider flags (--aws, --gcp, --azure, --cloudflare, --digitalocean, --hetzner, --vercel, --railway, --verda) together with --maker")
+				return fmt.Errorf("cannot use multiple provider flags (--aws, --gcp, --azure, --cloudflare, --digitalocean, --hetzner, --vercel, --railway, --verda, --tencent) together with --maker")
 			}
 			switch {
 			case explicitHetzner:
@@ -581,6 +600,9 @@ Examples:
 				makerProviderReason = "explicit"
 			case explicitVerda:
 				makerProvider = "verda"
+				makerProviderReason = "explicit"
+			case explicitTencent:
+				makerProvider = "tencent"
 				makerProviderReason = "explicit"
 			default:
 				svcCtx := routing.InferContext(questionForRouting(question))
@@ -636,6 +658,8 @@ Examples:
 				prompt = maker.RailwayPlanPromptWithMode(question, destroyer)
 			case "verda":
 				prompt = maker.VerdaPlanPromptWithMode(question, destroyer)
+			case "tencent":
+				prompt = maker.TencentPlanPromptWithMode(question, destroyer)
 			default:
 				prompt = maker.PlanPromptWithMode(question, destroyer)
 			}
@@ -698,7 +722,7 @@ Examples:
 
 			// Handle GCP, Azure, Cloudflare, Digital Ocean, Hetzner, Vercel, Verda, and Railway plans (output directly, no enrichment)
 			providerLower := strings.ToLower(strings.TrimSpace(plan.Provider))
-			if providerLower == "gcp" || providerLower == "azure" || providerLower == "cloudflare" || providerLower == "digitalocean" || providerLower == "hetzner" || providerLower == "vercel" || providerLower == "verda" || providerLower == "railway" {
+			if providerLower == "gcp" || providerLower == "azure" || providerLower == "cloudflare" || providerLower == "digitalocean" || providerLower == "hetzner" || providerLower == "vercel" || providerLower == "verda" || providerLower == "railway" || providerLower == "tencent" {
 				if plan.CreatedAt.IsZero() {
 					plan.CreatedAt = time.Now().UTC()
 				}

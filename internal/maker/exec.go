@@ -248,6 +248,11 @@ type ExecOptions struct {
 	VerdaClientSecret string
 	VerdaProjectID    string
 
+	// Tencent Cloud options
+	TencentSecretID  string
+	TencentSecretKey string
+	TencentRegion    string
+
 	CheckpointKey            string
 	DisableDurableCheckpoint bool
 
