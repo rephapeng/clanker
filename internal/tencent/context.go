@@ -9,6 +9,10 @@ import (
 	"time"
 
 	cdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb/v20170320"
+	antiddos "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/antiddos/v20200309"
+	waf "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/waf/v20180125"
+	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
+	cdn "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn/v20180606"
 	cynosdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cynosdb/v20190107"
 	mongodb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/mongodb/v20190725"
 	redis "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/redis/v20180412"
@@ -114,6 +118,26 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 			name: "CynosDBClusters",
 			keys: []string{"cynosdb", "tdsql-c", "serverless"},
 			run:  func() (string, error) { return c.contextCynosDB(ctx) },
+		},
+		{
+			name: "CDNDomains",
+			keys: []string{"cdn", "edge", "cache"},
+			run:  func() (string, error) { return c.contextCDN(ctx) },
+		},
+		{
+			name: "EdgeOneZones",
+			keys: []string{"edgeone", "teo", "zone"},
+			run:  func() (string, error) { return c.contextEdgeOne(ctx) },
+		},
+		{
+			name: "WAFHosts",
+			keys: []string{"waf", "firewall", "shield"},
+			run:  func() (string, error) { return c.contextWAF(ctx) },
+		},
+		{
+			name: "AntiDDoSInstances",
+			keys: []string{"ddos", "antiddos", "attack"},
+			run:  func() (string, error) { return c.contextAntiDDoS(ctx) },
 		},
 	}
 
@@ -848,6 +872,175 @@ func (c *Client) contextCynosDB(ctx context.Context) (string, error) {
 			DBVersion:   derefStringRaw(cl.DbVersion),
 			InstanceNum: derefInt64Raw(cl.InstanceNum),
 			Zone:        derefStringRaw(cl.Zone),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+
+func (c *Client) contextCDN(ctx context.Context) (string, error) {
+	client, err := newCDNClient(c)
+	if err != nil {
+		return "", err
+	}
+	req := cdn.NewDescribeDomainsRequest()
+	var offset, limit int64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeDomains(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.Domains) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID      string `json:"id"`
+		Domain  string `json:"domain"`
+		CName   string `json:"cname,omitempty"`
+		Status  string `json:"status"`
+		Service string `json:"service,omitempty"`
+		Created string `json:"created_at,omitempty"`
+	}
+	var slim []s
+	for _, d := range resp.Response.Domains {
+		slim = append(slim, s{
+			ID:      derefStringRaw(d.ResourceId),
+			Domain:  derefStringRaw(d.Domain),
+			CName:   derefStringRaw(d.Cname),
+			Status:  derefStringRaw(d.Status),
+			Service: derefStringRaw(d.ServiceType),
+			Created: derefStringRaw(d.CreateTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextEdgeOne(ctx context.Context) (string, error) {
+	client, err := newEdgeOneClient(c)
+	if err != nil {
+		return "", err
+	}
+	req := teo.NewDescribeZonesRequest()
+	var offset, limit int64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeZones(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.Zones) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Type   string `json:"type,omitempty"`
+		Area   string `json:"area,omitempty"`
+		Status string `json:"status,omitempty"`
+	}
+	var slim []s
+	for _, z := range resp.Response.Zones {
+		slim = append(slim, s{
+			ID:     derefStringRaw(z.ZoneId),
+			Name:   derefStringRaw(z.ZoneName),
+			Type:   derefStringRaw(z.Type),
+			Area:   derefStringRaw(z.Area),
+			Status: derefStringRaw(z.Status),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextWAF(ctx context.Context) (string, error) {
+	client, err := newWAFClient(c)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.DescribeHosts(waf.NewDescribeHostsRequest())
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || resp.Response.HostList == nil || len(resp.Response.HostList) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID         string `json:"id"`
+		Domain     string `json:"domain"`
+		MainDomain string `json:"main_domain,omitempty"`
+		Mode       string `json:"mode,omitempty"`
+		Status     string `json:"status,omitempty"`
+	}
+	var slim []s
+	for _, h := range resp.Response.HostList {
+		slim = append(slim, s{
+			ID:         derefStringRaw(h.DomainId),
+			Domain:     derefStringRaw(h.Domain),
+			MainDomain: derefStringRaw(h.MainDomain),
+			Mode:       wafMode(h.Mode),
+			Status:     wafStatus(h.Status),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextAntiDDoS(ctx context.Context) (string, error) {
+	client, err := newAntiDDoSClient(c)
+	if err != nil {
+		return "", err
+	}
+	req := antiddos.NewDescribeListBGPIPInstancesRequest()
+	var offset, limit uint64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeListBGPIPInstances(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.InstanceList) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID      string `json:"id"`
+		Name    string `json:"name,omitempty"`
+		Status  string `json:"status"`
+		Region  string `json:"region,omitempty"`
+		Created string `json:"created_at,omitempty"`
+		Expires string `json:"expires_at,omitempty"`
+	}
+	var slim []s
+	for _, i := range resp.Response.InstanceList {
+		id := ""
+		if i.InstanceDetail != nil {
+			id = derefStringRaw(i.InstanceDetail.InstanceId)
+		}
+		region := ""
+		if i.Region != nil {
+			region = derefStringRaw(i.Region.Region)
+		}
+		slim = append(slim, s{
+			ID:      id,
+			Name:    derefStringRaw(i.Name),
+			Status:  derefStringRaw(i.Status),
+			Region:  region,
+			Created: derefStringRaw(i.CreatedTime),
+			Expires: derefStringRaw(i.ExpiredTime),
 		})
 	}
 	b, err := json.Marshal(slim)

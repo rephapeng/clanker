@@ -43,6 +43,10 @@ Supported resources:
   redis, valkey               - TencentDB for Redis instances
   mongo, mongodb              - TencentDB for MongoDB instances
   cynosdb, tdsql-c            - CynosDB (TDSQL-C) clusters
+  cdn, cdn-domains            - CDN accelerated domains (account-global)
+  edgeone, teo, zones         - EdgeOne (TEO) zones (account-global)
+  waf, waf-hosts              - WAF-protected hosts (account-global)
+  antiddos, ddos              - Anti-DDoS Advanced (BGP-IP) instances
 
 Use --all-regions to fan out across every available region (does not apply
 to cos, which uses a service-global endpoint).`,
@@ -108,8 +112,16 @@ to cos, which uses a service-global endpoint).`,
 				return listMongoDB(client, regions)
 			case "cynosdb", "tdsql-c", "tdsqlc":
 				return listCynosDB(client, regions)
+			case "cdn", "cdn-domains":
+				return listCDNDomains(client)
+			case "edgeone", "teo", "zones":
+				return listEdgeOneZones(client)
+			case "waf", "waf-hosts":
+				return listWAFHosts(client)
+			case "antiddos", "ddos":
+				return listAntiDDoS(client)
 			default:
-				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam, redis, mongodb, cynosdb)", resourceType)
+				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam, redis, mongodb, cynosdb, cdn, edgeone, waf, antiddos)", resourceType)
 			}
 		},
 	}

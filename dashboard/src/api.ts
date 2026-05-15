@@ -288,3 +288,25 @@ export function getDBExposure(region: string) {
     `/api/v1/tencent/scan/db-exposure${q}`,
   );
 }
+
+export type WAFCoverageResult = {
+  waf_protected: string[];
+  items: { domain: string; source: string }[];
+};
+
+export function getWAFCoverage() {
+  return call<WAFCoverageResult>(`/api/v1/tencent/scan/waf-coverage`);
+}
+
+export type AntiDDoSCoverageResult = {
+  region: string;
+  posture: string;
+  has_advanced: boolean;
+  advanced_instances?: string[];
+  public_targets: { kind: string; id: string; name?: string; public_ip: string }[];
+};
+
+export function getAntiDDoSCoverage(region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<AntiDDoSCoverageResult>(`/api/v1/tencent/scan/antiddos-coverage${q}`);
+}

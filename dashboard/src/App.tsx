@@ -15,6 +15,10 @@ import {
   getPublicExposure,
   getCAMHygiene,
   getDBExposure,
+  getAntiDDoSCoverage,
+  getWAFCoverage,
+  AntiDDoSCoverageResult,
+  WAFCoverageResult,
   DBExposureFinding,
   getCertExpiry,
   getUnencryptedCBS,
@@ -59,6 +63,10 @@ const RESOURCE_TYPES = [
   "redis",
   "mongodb",
   "cynosdb",
+  "cdn",
+  "edgeone",
+  "waf",
+  "antiddos",
 ];
 
 export default function App() {
@@ -514,7 +522,7 @@ function groupTopology(data: Topology) {
 function SecurityScanView() {
   const [region, setRegion] = useState("ap-singapore");
   const regions = useRegions();
-  const [tab, setTab] = useState<"public-exposure" | "clb" | "eip" | "cbs" | "ssl" | "cam" | "db">("public-exposure");
+  const [tab, setTab] = useState<"public-exposure" | "clb" | "eip" | "cbs" | "ssl" | "cam" | "db" | "waf" | "ddos">("public-exposure");
 
   return (
     <section>
@@ -533,6 +541,8 @@ function SecurityScanView() {
           ["ssl", "Cert expiry"],
           ["cam", "CAM hygiene"],
           ["db", "DB exposure"],
+          ["waf", "WAF coverage"],
+          ["ddos", "Anti-DDoS coverage"],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -549,7 +559,7 @@ function SecurityScanView() {
         ))}
       </div>
 
-      {(tab === "public-exposure" || tab === "clb" || tab === "eip" || tab === "cbs" || tab === "db") && (
+      {(tab === "public-exposure" || tab === "clb" || tab === "eip" || tab === "cbs" || tab === "db" || tab === "ddos") && (
         <div className="flex gap-3 items-end mb-6">
           <Field label="Region">
             <RegionSelect value={region} onChange={setRegion} regions={regions} />
@@ -564,6 +574,8 @@ function SecurityScanView() {
       {tab === "ssl" && <CertExpirySection />}
       {tab === "cam" && <CAMHygieneSection />}
       {tab === "db" && <DBExposureSection region={region} />}
+      {tab === "waf" && <WAFCoverageSection />}
+      {tab === "ddos" && <AntiDDoSCoverageSection region={region} />}
     </section>
   );
 }
@@ -865,6 +877,108 @@ function DBExposureSection({ region }: { region: string }) {
     </>
   );
 }
+
+
+function WAFCoverageSection() {
+  const [data, setData] = useState<WAFCoverageResult | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setData(null);
+    const r = await getWAFCoverage();
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setData(r.data);
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {data && data.items.length === 0 && data.waf_protected.length === 0 && (
+        <Empty message="No CDN/EdgeOne domains found AND no WAF hosts configured. (Nothing to audit.)" />
+      )}
+      {data && data.items.length === 0 && data.waf_protected.length > 0 && (
+        <Empty message={`All CDN/EdgeOne domains are covered by WAF (${data.waf_protected.length} protected hosts). ✓`} />
+      )}
+      {data && data.items.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm mb-3"><span className="text-rose-400 font-medium">{data.items.length}</span> domain(s) lack WAF coverage.</div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>Domain</Th><Th>Source</Th></tr></thead>
+            <tbody>
+              {data.items.map((it, i) => (
+                <tr key={i} className="border-b border-slate-900 bg-rose-950/10">
+                  <Td>{it.domain}</Td><Td>{it.source}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-3 text-xs text-slate-500">WAF-protected hosts: {data.waf_protected.join(", ") || "(none)"}</div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function AntiDDoSCoverageSection({ region }: { region: string }) {
+  const [data, setData] = useState<AntiDDoSCoverageResult | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setData(null);
+    const r = await getAntiDDoSCoverage(region);
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setData(r.data);
+  }
+  function postureColor(p: string) {
+    if (p === "BASIC_ONLY") return "text-rose-400";
+    if (p.startsWith("ADVANCED")) return "text-emerald-400";
+    return "text-amber-400";
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {data && (
+        <div className="mt-4 space-y-4">
+          <div className="border border-slate-800 rounded-lg p-4 bg-slate-900/40">
+            <div className="text-xs uppercase text-slate-400 mb-1">Account posture</div>
+            <div className={"text-lg font-semibold " + postureColor(data.posture)}>{data.posture}</div>
+            <div className="text-sm text-slate-400 mt-2">
+              {data.posture === "BASIC_ONLY" && "All public IPs rely on the free Anti-DDoS Basic tier (~2Gbps protection per IP). For higher-risk workloads, consider Anti-DDoS Advanced or Anti-DDoS Pro subscriptions."}
+              {data.posture === "MIXED" && `Account has ${data.advanced_instances?.length ?? 0} Anti-DDoS Advanced instance(s). Below: public-facing resources in this region — verify each high-risk one is bound to an Advanced instance.`}
+              {data.posture === "ADVANCED_SUBSCRIBED_NO_PUBLIC" && "Account has Advanced Anti-DDoS subscriptions but no public-facing resources in this region."}
+            </div>
+            {data.advanced_instances && data.advanced_instances.length > 0 && (
+              <div className="mt-2 text-xs">
+                <span className="text-slate-400">Advanced instances: </span>
+                <span className="font-mono text-emerald-300">{data.advanced_instances.join(", ")}</span>
+              </div>
+            )}
+          </div>
+          {data.public_targets.length > 0 && (
+            <div>
+              <div className="text-sm mb-2 text-slate-400">{data.public_targets.length} public-facing target(s) in {data.region}:</div>
+              <table className="w-full text-sm">
+                <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>Kind</Th><Th>ID</Th><Th>Name</Th><Th>Public IP</Th></tr></thead>
+                <tbody>
+                  {data.public_targets.map((t) => (
+                    <tr key={t.kind + ":" + t.id} className={"border-b border-slate-900 " + (data.has_advanced ? "" : "bg-rose-950/10")}>
+                      <Td><span className="text-xs uppercase font-mono">{t.kind}</span></Td>
+                      <Td>{t.id}</Td><Td>{t.name ?? "-"}</Td><Td><span className="font-mono">{t.public_ip}</span></Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 
 function ScanRunButton({ onClick, loading }: { onClick: () => void; loading: boolean }) {
   return (
