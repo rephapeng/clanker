@@ -32,7 +32,7 @@ require (
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb v1.3.94
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.97
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.98
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.89
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/postgres v1.3.89
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tke v1.3.86
@@ -118,6 +118,9 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam v1.3.42 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cbs v1.3.96 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/clb v1.3.83 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cynosdb v1.3.98 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/mongodb v1.3.93 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/redis v1.3.79 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.94 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect

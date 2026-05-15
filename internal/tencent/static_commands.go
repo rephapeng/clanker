@@ -40,6 +40,9 @@ Supported resources:
   cbs, disks, volumes         - Cloud Block Storage volumes
   ssl, certs, certificates    - SSL certificates (service-global)
   cam, iam, users             - CAM sub-account users (account-global)
+  redis, valkey               - TencentDB for Redis instances
+  mongo, mongodb              - TencentDB for MongoDB instances
+  cynosdb, tdsql-c            - CynosDB (TDSQL-C) clusters
 
 Use --all-regions to fan out across every available region (does not apply
 to cos, which uses a service-global endpoint).`,
@@ -99,8 +102,14 @@ to cos, which uses a service-global endpoint).`,
 				return listSSLCerts(client)
 			case "cam", "iam", "user", "users":
 				return listCAMUsers(client)
+			case "redis", "valkey":
+				return listRedis(client, regions)
+			case "mongo", "mongodb":
+				return listMongoDB(client, regions)
+			case "cynosdb", "tdsql-c", "tdsqlc":
+				return listCynosDB(client, regions)
 			default:
-				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam)", resourceType)
+				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam, redis, mongodb, cynosdb)", resourceType)
 			}
 		},
 	}

@@ -272,3 +272,19 @@ export type CAMHygieneItem = {
 export function getCAMHygiene() {
   return call<{ total_users: number; items: CAMHygieneItem[] }>(`/api/v1/tencent/scan/cam-hygiene`);
 }
+
+export type DBExposureFinding = {
+  engine: string;
+  id: string;
+  name?: string;
+  status: string;
+  public_addr: string;
+  reason: string;
+};
+
+export function getDBExposure(region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<{ region: string; items: DBExposureFinding[]; warnings?: string[] }>(
+    `/api/v1/tencent/scan/db-exposure${q}`,
+  );
+}

@@ -33,6 +33,11 @@ func (c *Client) JSONCBS(ctx context.Context) (string, error)        { return c.
 func (c *Client) JSONSSL(ctx context.Context) (string, error)        { return c.contextSSL(ctx) }
 func (c *Client) JSONCAM(ctx context.Context) (string, error)        { return c.contextCAM(ctx) }
 
+
+func (c *Client) JSONRedis(ctx context.Context) (string, error)      { return c.contextRedis(ctx) }
+func (c *Client) JSONMongoDB(ctx context.Context) (string, error)    { return c.contextMongoDB(ctx) }
+func (c *Client) JSONCynosDB(ctx context.Context) (string, error)    { return c.contextCynosDB(ctx) }
+
 // JSONSGRules returns the ingress + egress policies of a single security
 // group plus a `risk` label on each ingress rule that exposes a sensitive
 // port to the public internet. Wraps DescribeSecurityGroupPolicies.

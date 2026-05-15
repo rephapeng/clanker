@@ -14,6 +14,8 @@ import {
   getHealth,
   getPublicExposure,
   getCAMHygiene,
+  getDBExposure,
+  DBExposureFinding,
   getCertExpiry,
   getUnencryptedCBS,
   getIdleEIPs,
@@ -54,6 +56,9 @@ const RESOURCE_TYPES = [
   "cbs",
   "ssl",
   "cam",
+  "redis",
+  "mongodb",
+  "cynosdb",
 ];
 
 export default function App() {
@@ -509,7 +514,7 @@ function groupTopology(data: Topology) {
 function SecurityScanView() {
   const [region, setRegion] = useState("ap-singapore");
   const regions = useRegions();
-  const [tab, setTab] = useState<"public-exposure" | "clb" | "eip" | "cbs" | "ssl" | "cam">("public-exposure");
+  const [tab, setTab] = useState<"public-exposure" | "clb" | "eip" | "cbs" | "ssl" | "cam" | "db">("public-exposure");
 
   return (
     <section>
@@ -527,6 +532,7 @@ function SecurityScanView() {
           ["cbs", "Unencrypted CBS"],
           ["ssl", "Cert expiry"],
           ["cam", "CAM hygiene"],
+          ["db", "DB exposure"],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -543,7 +549,7 @@ function SecurityScanView() {
         ))}
       </div>
 
-      {(tab === "public-exposure" || tab === "clb" || tab === "eip" || tab === "cbs") && (
+      {(tab === "public-exposure" || tab === "clb" || tab === "eip" || tab === "cbs" || tab === "db") && (
         <div className="flex gap-3 items-end mb-6">
           <Field label="Region">
             <RegionSelect value={region} onChange={setRegion} regions={regions} />
@@ -557,6 +563,7 @@ function SecurityScanView() {
       {tab === "cbs" && <UnencryptedCBSSection region={region} />}
       {tab === "ssl" && <CertExpirySection />}
       {tab === "cam" && <CAMHygieneSection />}
+      {tab === "db" && <DBExposureSection region={region} />}
     </section>
   );
 }
@@ -802,6 +809,53 @@ function CAMHygieneSection() {
                   <Td>{u.console_login ? <span className="text-rose-400">yes</span> : <span className="text-emerald-400">no</span>}</Td>
                   <Td>{u.phone_registered ? <span className="text-emerald-400">yes</span> : <span className="text-rose-400">no</span>}</Td>
                   <Td><span className="text-xs">{u.findings.join(", ")}</span></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+
+function DBExposureSection({ region }: { region: string }) {
+  const [items, setItems] = useState<DBExposureFinding[] | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setItems(null);
+    const r = await getDBExposure(region);
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setItems(r.data.items ?? []);
+  }
+  function engineColor(e: string) {
+    switch (e) {
+      case "mysql":    return "border-amber-700 bg-amber-950/30 text-amber-200";
+      case "postgres": return "border-sky-700 bg-sky-950/30 text-sky-200";
+      case "redis":    return "border-rose-700 bg-rose-950/30 text-rose-200";
+      case "mongo":
+      case "mongodb":  return "border-emerald-700 bg-emerald-950/30 text-emerald-200";
+      default:         return "border-slate-700 bg-slate-900 text-slate-300";
+    }
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && <Empty message="No managed databases reachable from the public internet in this region. ✓" />}
+      {items && items.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm mb-3"><span className="text-rose-400 font-medium">{items.length}</span> database(s) reachable from the public internet.</div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>Engine</Th><Th>ID</Th><Th>Name</Th><Th>Status</Th><Th>Public addr</Th><Th>Reason</Th></tr></thead>
+            <tbody>
+              {items.map((d) => (
+                <tr key={d.engine + ":" + d.id} className="border-b border-slate-900">
+                  <Td><span className={"px-2 py-0.5 rounded text-[11px] font-mono border " + engineColor(d.engine)}>{d.engine}</span></Td>
+                  <Td>{d.id}</Td><Td>{d.name ?? "-"}</Td><Td>{d.status}</Td><Td><span className="font-mono">{d.public_addr}</span></Td><Td>{d.reason}</Td>
                 </tr>
               ))}
             </tbody>

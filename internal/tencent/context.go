@@ -9,6 +9,9 @@ import (
 	"time"
 
 	cdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb/v20170320"
+	cynosdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cynosdb/v20190107"
+	mongodb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/mongodb/v20190725"
+	redis "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/redis/v20180412"
 	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
 	cam "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam/v20190116"
 	cbs "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cbs/v20170312"
@@ -96,6 +99,21 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 			name: "CAMUsers",
 			keys: []string{"cam", "iam", "user", "subaccount", "mfa", "identity"},
 			run:  func() (string, error) { return c.contextCAM(ctx) },
+		},
+		{
+			name: "RedisInstances",
+			keys: []string{"redis", "valkey", "cache"},
+			run:  func() (string, error) { return c.contextRedis(ctx) },
+		},
+		{
+			name: "MongoDBInstances",
+			keys: []string{"mongo", "mongodb", "document"},
+			run:  func() (string, error) { return c.contextMongoDB(ctx) },
+		},
+		{
+			name: "CynosDBClusters",
+			keys: []string{"cynosdb", "tdsql-c", "serverless"},
+			run:  func() (string, error) { return c.contextCynosDB(ctx) },
 		},
 	}
 
@@ -689,6 +707,147 @@ func (c *Client) contextCAM(ctx context.Context) (string, error) {
 			ConsoleLogin: derefUint64Raw(u.ConsoleLogin) == 1,
 			PhoneSet:     phone != "",
 			Created:      derefStringRaw(u.CreateTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+
+func (c *Client) contextRedis(ctx context.Context) (string, error) {
+	client, err := newRedisClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	req := redis.NewDescribeInstancesRequest()
+	var offset, limit uint64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeInstances(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.InstanceSet) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID         string `json:"id"`
+		Name       string `json:"name,omitempty"`
+		Status     string `json:"status"`
+		MemoryMB   int64  `json:"memory_mb,omitempty"`
+		Vip        string `json:"vip,omitempty"`
+		Port       int64  `json:"port,omitempty"`
+		PublicAddr string `json:"public_addr,omitempty"`
+		Created    string `json:"created_at,omitempty"`
+	}
+	var slim []s
+	for _, i := range resp.Response.InstanceSet {
+		size := int64(0)
+		if i.Size != nil {
+			size = int64(*i.Size)
+		}
+		slim = append(slim, s{
+			ID:         derefStringRaw(i.InstanceId),
+			Name:       derefStringRaw(i.InstanceName),
+			Status:     redisStatus(i.Status),
+			MemoryMB:   size,
+			Vip:        derefStringRaw(i.WanIp),
+			Port:       derefInt64Raw(i.Port),
+			PublicAddr: derefStringRaw(i.WanAddress),
+			Created:    derefStringRaw(i.Createtime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextMongoDB(ctx context.Context) (string, error) {
+	client, err := newMongoDBClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	req := mongodb.NewDescribeDBInstancesRequest()
+	var offset, limit uint64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeDBInstances(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.InstanceDetails) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID          string `json:"id"`
+		Name        string `json:"name,omitempty"`
+		Status      string `json:"status"`
+		ClusterType string `json:"cluster_type"`
+		Vip         string `json:"vip,omitempty"`
+		Port        uint64 `json:"port,omitempty"`
+		Zone        string `json:"zone,omitempty"`
+		Created     string `json:"created_at,omitempty"`
+	}
+	var slim []s
+	for _, i := range resp.Response.InstanceDetails {
+		slim = append(slim, s{
+			ID:          derefStringRaw(i.InstanceId),
+			Name:        derefStringRaw(i.InstanceName),
+			Status:      mongoStatus(i.Status),
+			ClusterType: mongoClusterType(i.ClusterType),
+			Vip:         derefStringRaw(i.Vip),
+			Port:        derefUint64Raw(i.Vport),
+			Zone:        derefStringRaw(i.Zone),
+			Created:     derefStringRaw(i.CreateTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextCynosDB(ctx context.Context) (string, error) {
+	client, err := newCynosDBClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	req := cynosdb.NewDescribeClustersRequest()
+	var offset, limit int64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeClusters(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.ClusterSet) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID          string `json:"id"`
+		Name        string `json:"name,omitempty"`
+		Status      string `json:"status"`
+		Engine      string `json:"engine,omitempty"`
+		DBVersion   string `json:"db_version,omitempty"`
+		InstanceNum int64  `json:"instance_num"`
+		Zone        string `json:"zone,omitempty"`
+	}
+	var slim []s
+	for _, cl := range resp.Response.ClusterSet {
+		slim = append(slim, s{
+			ID:          derefStringRaw(cl.ClusterId),
+			Name:        derefStringRaw(cl.ClusterName),
+			Status:      derefStringRaw(cl.Status),
+			Engine:      derefStringRaw(cl.DbType),
+			DBVersion:   derefStringRaw(cl.DbVersion),
+			InstanceNum: derefInt64Raw(cl.InstanceNum),
+			Zone:        derefStringRaw(cl.Zone),
 		})
 	}
 	b, err := json.Marshal(slim)
