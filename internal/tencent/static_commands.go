@@ -227,9 +227,52 @@ externally-routable endpoint when running from outside the cluster's VPC.`,
 	}
 	kubeconfigCmd.Flags().BoolVar(&kubeconfigPublic, "public", false, "Fetch the public (extranet) kubeconfig instead of the VPC-internal one")
 
+	var costMonth string
+	costCmd := &cobra.Command{
+		Use:   "cost",
+		Short: "Tencent Cloud billing — cost commands",
+	}
+	costByProductCmd := &cobra.Command{
+		Use:   "by-product",
+		Short: "Cost breakdown by Tencent service for a given month",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			creds := ResolveCredentials()
+			if region != "" {
+				creds.Region = region
+			}
+			client, err := NewClient(creds, viper.GetBool("debug"))
+			if err != nil {
+				return err
+			}
+			return listBillByProduct(client, costMonth)
+		},
+	}
+	costByProductCmd.Flags().StringVar(&costMonth, "month", "", "YYYY-MM (default: current month)")
+	costTopCmd := &cobra.Command{
+		Use:   "top",
+		Short: "Top N resources by spend for a given month",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			creds := ResolveCredentials()
+			if region != "" {
+				creds.Region = region
+			}
+			client, err := NewClient(creds, viper.GetBool("debug"))
+			if err != nil {
+				return err
+			}
+			topN, _ := cmd.Flags().GetInt("limit")
+			return listBillResourceTop(client, costMonth, topN)
+		},
+	}
+	costTopCmd.Flags().StringVar(&costMonth, "month", "", "YYYY-MM (default: current month)")
+	costTopCmd.Flags().Int("limit", 20, "Number of resources to return (max 200)")
+	costCmd.AddCommand(costByProductCmd)
+	costCmd.AddCommand(costTopCmd)
+
 	tencentCmd.AddCommand(listCmd)
 	tencentCmd.AddCommand(regionsCmd)
 	tencentCmd.AddCommand(sgRulesCmd)
 	tencentCmd.AddCommand(kubeconfigCmd)
+	tencentCmd.AddCommand(costCmd)
 	return tencentCmd
 }

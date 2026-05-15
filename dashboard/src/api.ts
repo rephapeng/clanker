@@ -338,3 +338,39 @@ export function getCVMMetrics(region: string, metric = "CPUUsage", minutes = 60)
     `/api/v1/tencent/metrics/cvm${q}`,
   );
 }
+
+export type ProductCost = {
+  code: string;
+  name: string;
+  real_cost: number;
+  cash_pay: number;
+  incentive_pay: number;
+  voucher_pay: number;
+  ratio?: string;
+};
+
+export function getCostByProduct(month: string) {
+  const q = month ? `?month=${encodeURIComponent(month)}` : "";
+  return call<{ month: string; total: number; items: ProductCost[] }>(
+    `/api/v1/tencent/cost/by-product${q}`,
+  );
+}
+
+export type ResourceCost = {
+  product: string;
+  resource_id: string;
+  name?: string;
+  region?: string;
+  pay_mode?: string;
+  action?: string;
+  cost: number;
+};
+
+export function getCostResources(month: string, top = 50) {
+  const q = month
+    ? `?month=${encodeURIComponent(month)}&top=${top}`
+    : `?top=${top}`;
+  return call<{ month: string; top: number; items: ResourceCost[] }>(
+    `/api/v1/tencent/cost/resources${q}`,
+  );
+}

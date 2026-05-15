@@ -116,6 +116,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/antiddos v1.3.89 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/billing v1.3.84 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam v1.3.42 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cbs v1.3.96 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn v1.3.90 // indirect

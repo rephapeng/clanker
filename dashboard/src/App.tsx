@@ -17,6 +17,10 @@ import {
   getDBExposure,
   getAntiDDoSCoverage,
   getCVMMetrics,
+  getCostResources,
+  getCostByProduct,
+  ResourceCost,
+  ProductCost,
   getAuditCoverage,
   CVMMetricItem,
   AuditCoverageResult,
@@ -49,6 +53,7 @@ type View =
   | "sg-audit"
   | "maker"
   | "monitoring"
+  | "cost"
   | "activity"
   | "settings";
 
@@ -117,6 +122,7 @@ export default function App() {
           <NavBtn label="Security scan" active={view === "security-scan"} onClick={() => setView("security-scan")} />
           <NavBtn label="SG audit" active={view === "sg-audit"} onClick={() => setView("sg-audit")} />
           <NavBtn label="Maker" active={view === "maker"} onClick={() => setView("maker")} />
+          <NavBtn label="Cost" active={view === "cost"} onClick={() => setView("cost")} />
           <NavBtn label="Monitoring" active={view === "monitoring"} onClick={() => setView("monitoring")} />
           <NavBtn label="Activity" active={view === "activity"} onClick={() => setView("activity")} />
           <NavBtn label="Settings" active={view === "settings"} onClick={() => setView("settings")} />
@@ -139,6 +145,7 @@ export default function App() {
         {view === "sg-audit" && <SGAuditView key={"sg-" + refreshKey} />}
         {view === "maker" && <MakerView key={"maker-" + refreshKey} />}
         {view === "monitoring" && <MonitoringView key={"monitoring-" + refreshKey} />}
+        {view === "cost" && <CostExplorerView key={"cost-" + refreshKey} />}
         {view === "activity" && <ActivityView key={"activity-" + refreshKey} />}
         {view === "settings" && (
           <SettingsView
@@ -1129,6 +1136,125 @@ function MonitoringView() {
             ))}
           </tbody>
         </table>
+      )}
+    </section>
+  );
+}
+
+
+
+function CostExplorerView() {
+  const now = new Date();
+  const defaultMonth =
+    now.getUTCFullYear() + "-" + String(now.getUTCMonth() + 1).padStart(2, "0");
+  const [month, setMonth] = useState(defaultMonth);
+  const [products, setProducts] = useState<{ total: number; items: ProductCost[] } | null>(null);
+  const [resources, setResources] = useState<ResourceCost[] | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function run() {
+    setLoading(true); setErr("");
+    setProducts(null); setResources(null);
+    const [p, rsr] = await Promise.all([
+      getCostByProduct(month),
+      getCostResources(month, 50),
+    ]);
+    setLoading(false);
+    if (!p.ok) { setErr(`${p.code}: ${p.message}`); return; }
+    setProducts({ total: p.data.total, items: p.data.items ?? [] });
+    if (rsr.ok) setResources(rsr.data.items ?? []);
+  }
+
+  useEffect(() => { void run(); /* eslint-disable-next-line */ }, []);
+
+  const maxProduct = products && products.items.length > 0
+    ? Math.max(...products.items.map((p) => p.real_cost))
+    : 0;
+
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold mb-1">Cost Explorer</h1>
+      <p className="text-slate-400 text-sm mb-6">
+        Tencent Cloud billing summary by service + top resources by spend. Pick a month
+        (YYYY-MM). All amounts shown are RealCost (post-discount) in account currency.
+      </p>
+      <div className="flex gap-3 items-end mb-6">
+        <Field label="Month">
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="bg-slate-800 border border-slate-700 rounded px-2 py-1"
+          />
+        </Field>
+        <button onClick={() => void run()} disabled={loading} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 rounded text-sm font-medium">
+          {loading ? "Loading..." : "Fetch"}
+        </button>
+        {products && (
+          <span className="ml-auto text-sm">
+            <span className="text-slate-400">Total: </span>
+            <span className="font-mono text-emerald-300 text-base">{products.total.toFixed(2)}</span>
+          </span>
+        )}
+      </div>
+
+      {err && <ErrorBox message={err} />}
+
+      {products && products.items.length === 0 && (
+        <Empty message={`No billing data for ${month}. Check that the month has closed or pick an earlier month.`} />
+      )}
+
+      {products && products.items.length > 0 && (
+        <div className="mb-8">
+          <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">By service</div>
+          <div className="space-y-1.5">
+            {products.items
+              .slice()
+              .sort((a, b) => b.real_cost - a.real_cost)
+              .map((p) => (
+                <div key={p.code || p.name} className="flex items-center gap-3 text-sm">
+                  <div className="w-48 truncate text-slate-300">{p.name}</div>
+                  <div className="flex-1 bg-slate-900 rounded h-6 overflow-hidden relative">
+                    <div
+                      className="h-full bg-gradient-to-r from-sky-700 to-sky-500"
+                      style={{ width: maxProduct ? `${(p.real_cost / maxProduct) * 100}%` : "0%" }}
+                    />
+                    <div className="absolute inset-0 flex items-center px-2 text-xs font-mono">
+                      {p.real_cost.toFixed(2)}
+                      {p.ratio && <span className="ml-2 text-slate-400">({p.ratio}%)</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {resources && resources.length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">Top resources by spend</div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-400 border-b border-slate-800">
+              <tr><Th>Product</Th><Th>Resource ID</Th><Th>Name</Th><Th>Region</Th><Th>Pay mode</Th><Th>Cost</Th></tr>
+            </thead>
+            <tbody>
+              {resources
+                .slice()
+                .sort((a, b) => b.cost - a.cost)
+                .map((r, i) => (
+                  <tr key={i} className="border-b border-slate-900">
+                    <Td>{r.product}</Td>
+                    <Td>{r.resource_id}</Td>
+                    <Td>{r.name || "-"}</Td>
+                    <Td>{r.region || "-"}</Td>
+                    <Td>{r.pay_mode || "-"}</Td>
+                    <Td><span className="font-mono">{r.cost.toFixed(4)}</span></Td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
