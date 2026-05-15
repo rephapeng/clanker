@@ -16,6 +16,10 @@ import {
   getCAMHygiene,
   getDBExposure,
   getAntiDDoSCoverage,
+  getCVMMetrics,
+  getAuditCoverage,
+  CVMMetricItem,
+  AuditCoverageResult,
   getWAFCoverage,
   AntiDDoSCoverageResult,
   WAFCoverageResult,
@@ -44,6 +48,7 @@ type View =
   | "security-scan"
   | "sg-audit"
   | "maker"
+  | "monitoring"
   | "activity"
   | "settings";
 
@@ -71,6 +76,9 @@ const RESOURCE_TYPES = [
   "vpn",
   "ccn",
   "dc",
+  "monitor",
+  "cls",
+  "cloudaudit",
 ];
 
 export default function App() {
@@ -109,6 +117,7 @@ export default function App() {
           <NavBtn label="Security scan" active={view === "security-scan"} onClick={() => setView("security-scan")} />
           <NavBtn label="SG audit" active={view === "sg-audit"} onClick={() => setView("sg-audit")} />
           <NavBtn label="Maker" active={view === "maker"} onClick={() => setView("maker")} />
+          <NavBtn label="Monitoring" active={view === "monitoring"} onClick={() => setView("monitoring")} />
           <NavBtn label="Activity" active={view === "activity"} onClick={() => setView("activity")} />
           <NavBtn label="Settings" active={view === "settings"} onClick={() => setView("settings")} />
         </nav>
@@ -129,6 +138,7 @@ export default function App() {
         {view === "security-scan" && <SecurityScanView key={"scan-" + refreshKey} />}
         {view === "sg-audit" && <SGAuditView key={"sg-" + refreshKey} />}
         {view === "maker" && <MakerView key={"maker-" + refreshKey} />}
+        {view === "monitoring" && <MonitoringView key={"monitoring-" + refreshKey} />}
         {view === "activity" && <ActivityView key={"activity-" + refreshKey} />}
         {view === "settings" && (
           <SettingsView
@@ -526,7 +536,7 @@ function groupTopology(data: Topology) {
 function SecurityScanView() {
   const [region, setRegion] = useState("ap-singapore");
   const regions = useRegions();
-  const [tab, setTab] = useState<"public-exposure" | "clb" | "eip" | "cbs" | "ssl" | "cam" | "db" | "waf" | "ddos">("public-exposure");
+  const [tab, setTab] = useState<"public-exposure" | "clb" | "eip" | "cbs" | "ssl" | "cam" | "db" | "waf" | "ddos" | "audit">("public-exposure");
 
   return (
     <section>
@@ -547,6 +557,7 @@ function SecurityScanView() {
           ["db", "DB exposure"],
           ["waf", "WAF coverage"],
           ["ddos", "Anti-DDoS coverage"],
+          ["audit", "Audit log coverage"],
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -580,6 +591,7 @@ function SecurityScanView() {
       {tab === "db" && <DBExposureSection region={region} />}
       {tab === "waf" && <WAFCoverageSection />}
       {tab === "ddos" && <AntiDDoSCoverageSection region={region} />}
+      {tab === "audit" && <AuditCoverageSection />}
     </section>
   );
 }
@@ -980,6 +992,145 @@ function AntiDDoSCoverageSection({ region }: { region: string }) {
         </div>
       )}
     </>
+  );
+}
+
+
+
+function AuditCoverageSection() {
+  const [data, setData] = useState<AuditCoverageResult | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setData(null);
+    const r = await getAuditCoverage();
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setData(r.data);
+  }
+  function postureColor(p: string) {
+    if (p === "NO_TRACKS" || p === "ALL_DISABLED") return "text-rose-400";
+    if (p === "PARTIAL") return "text-amber-400";
+    return "text-emerald-400";
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {data && (
+        <div className="mt-4 space-y-4">
+          <div className="border border-slate-800 rounded-lg p-4 bg-slate-900/40">
+            <div className="text-xs uppercase text-slate-400 mb-1">Audit posture</div>
+            <div className={"text-lg font-semibold " + postureColor(data.posture)}>{data.posture}</div>
+            <div className="text-sm text-slate-400 mt-2">
+              {data.posture === "NO_TRACKS" && "No Cloud Audit tracks configured. API calls against this account are NOT logged. Configure a track with a COS bucket destination to enable forensics."}
+              {data.posture === "ALL_DISABLED" && `${data.disabled_count} track(s) exist but all are disabled. Enable at least one to capture API calls.`}
+              {data.posture === "PARTIAL" && `${data.enabled_count} of ${data.enabled_count + data.disabled_count} tracks are enabled.`}
+              {data.posture === "FULL" && `All ${data.enabled_count} track(s) are enabled. ✓`}
+            </div>
+          </div>
+          {data.tracks.length > 0 && (
+            <table className="w-full text-sm">
+              <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>Name</Th><Th>Enabled</Th><Th>COS bucket</Th><Th>Prefix</Th></tr></thead>
+              <tbody>
+                {data.tracks.map((t, i) => (
+                  <tr key={i} className={"border-b border-slate-900 " + (t.enabled ? "" : "bg-rose-950/10")}>
+                    <Td>{t.name}</Td>
+                    <Td>{t.enabled ? <span className="text-emerald-400">yes</span> : <span className="text-rose-400">no</span>}</Td>
+                    <Td>{t.cos_bucket ?? "-"}</Td><Td>{t.log_prefix ?? "-"}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function MonitoringView() {
+  const [region, setRegion] = useState("ap-singapore");
+  const regions = useRegions();
+  const [metric, setMetric] = useState("CPUUsage");
+  const [items, setItems] = useState<CVMMetricItem[] | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+
+  async function run() {
+    setLoading(true); setErr("");
+    const r = await getCVMMetrics(region, metric, 60);
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setItems(r.data.items ?? []);
+  }
+  useEffect(() => { void run(); /* eslint-disable-next-line */ }, [region, metric]);
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = setInterval(() => void run(), 30000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [autoRefresh, region, metric]);
+
+  function utilColor(v?: number) {
+    if (v == null) return "text-slate-500";
+    if (v > 80) return "text-rose-400";
+    if (v > 50) return "text-amber-400";
+    return "text-emerald-400";
+  }
+
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold mb-1">Monitoring</h1>
+      <p className="text-slate-400 text-sm mb-6">
+        Live Cloud Monitor metrics across every CVM in the region. Window: last 60 minutes,
+        one sample per minute. Toggle auto-refresh for a 30-second poll.
+      </p>
+      <div className="flex gap-3 items-end mb-6">
+        <Field label="Region">
+          <RegionSelect value={region} onChange={setRegion} regions={regions} />
+        </Field>
+        <Field label="Metric">
+          <select className="bg-slate-800 border border-slate-700 rounded px-2 py-1" value={metric} onChange={(e) => setMetric(e.target.value)}>
+            <option value="CPUUsage">CPU usage (%)</option>
+            <option value="MemUsage">Memory usage (%)</option>
+            <option value="LanOuttraffic">LAN out traffic</option>
+            <option value="LanIntraffic">LAN in traffic</option>
+            <option value="WanOuttraffic">WAN out traffic</option>
+            <option value="WanIntraffic">WAN in traffic</option>
+          </select>
+        </Field>
+        <button onClick={() => void run()} disabled={loading} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 rounded text-sm font-medium">
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="accent-emerald-500" />
+          <span>auto-refresh (30s)</span>
+        </label>
+      </div>
+
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && <Empty message="No CVMs in this region (or no data points returned)." />}
+      {items && items.length > 0 && (
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>Instance</Th><Th>Name</Th><Th>Latest</Th><Th>Min</Th><Th>Avg</Th><Th>Max</Th><Th>Samples</Th></tr></thead>
+          <tbody>
+            {items.map((it) => (
+              <tr key={it.instance_id} className="border-b border-slate-900">
+                <Td>{it.instance_id}</Td>
+                <Td>{it.name ?? "-"}</Td>
+                <Td><span className={utilColor(it.latest)}>{it.latest != null ? it.latest.toFixed(2) : "-"}</span></Td>
+                <Td>{it.min != null ? it.min.toFixed(2) : "-"}</Td>
+                <Td>{it.avg != null ? it.avg.toFixed(2) : "-"}</Td>
+                <Td>{it.max != null ? it.max.toFixed(2) : "-"}</Td>
+                <Td>{it.samples}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }
 

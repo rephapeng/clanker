@@ -310,3 +310,31 @@ export function getAntiDDoSCoverage(region: string) {
   const q = region ? `?region=${encodeURIComponent(region)}` : "";
   return call<AntiDDoSCoverageResult>(`/api/v1/tencent/scan/antiddos-coverage${q}`);
 }
+
+export type AuditCoverageResult = {
+  posture: string;
+  enabled_count: number;
+  disabled_count: number;
+  tracks: { name: string; enabled: boolean; cos_bucket?: string; log_prefix?: string }[];
+};
+
+export function getAuditCoverage() {
+  return call<AuditCoverageResult>(`/api/v1/tencent/scan/audit-coverage`);
+}
+
+export type CVMMetricItem = {
+  instance_id: string;
+  name?: string;
+  latest?: number;
+  min?: number;
+  max?: number;
+  avg?: number;
+  samples: number;
+};
+
+export function getCVMMetrics(region: string, metric = "CPUUsage", minutes = 60) {
+  const q = `?region=${encodeURIComponent(region)}&metric=${encodeURIComponent(metric)}&minutes=${minutes}`;
+  return call<{ region: string; metric: string; window_minutes: number; items: CVMMetricItem[] }>(
+    `/api/v1/tencent/metrics/cvm${q}`,
+  );
+}

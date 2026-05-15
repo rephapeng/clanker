@@ -9,6 +9,9 @@ import (
 	"time"
 
 	cdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb/v20170320"
+	monitor "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor/v20180724"
+	cls "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cls/v20201016"
+	cloudaudit "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cloudaudit/v20190319"
 	dc "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dc/v20180410"
 	antiddos "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/antiddos/v20200309"
 	waf "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/waf/v20180125"
@@ -159,6 +162,21 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 			name: "DirectConnects",
 			keys: []string{"dc", "direct-connect", "leased-line"},
 			run:  func() (string, error) { return c.contextDC(ctx) },
+		},
+		{
+			name: "AlarmPolicies",
+			keys: []string{"alarm", "alert", "monitor"},
+			run:  func() (string, error) { return c.contextAlarmPolicies(ctx) },
+		},
+		{
+			name: "CLSTopics",
+			keys: []string{"cls", "log", "logs"},
+			run:  func() (string, error) { return c.contextCLSTopics(ctx) },
+		},
+		{
+			name: "CloudAuditTracks",
+			keys: []string{"audit", "cloudaudit", "track", "compliance"},
+			run:  func() (string, error) { return c.contextCloudAudit(ctx) },
 		},
 	}
 
@@ -1231,6 +1249,121 @@ func (c *Client) contextDC(ctx context.Context) (string, error) {
 			Name:        derefStringRaw(d.DirectConnectName),
 			State:       derefStringRaw(d.State),
 			AccessPoint: derefStringRaw(d.AccessPointId),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+
+func (c *Client) contextAlarmPolicies(ctx context.Context) (string, error) {
+	client, err := newMonitorClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	req := monitor.NewDescribeAlarmPoliciesRequest()
+	module := "monitor"
+	req.Module = &module
+	var page, pageSize int64 = 1, 100
+	req.PageNumber = &page
+	req.PageSize = &pageSize
+	resp, err := client.DescribeAlarmPolicies(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.Policies) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID             string `json:"id"`
+		Name           string `json:"name,omitempty"`
+		Enabled        bool   `json:"enabled"`
+		MonitorType    string `json:"monitor_type,omitempty"`
+		BoundInstances int64  `json:"bound_instances"`
+	}
+	var slim []s
+	for _, p := range resp.Response.Policies {
+		slim = append(slim, s{
+			ID:             derefStringRaw(p.PolicyId),
+			Name:           derefStringRaw(p.PolicyName),
+			Enabled:        derefInt64Raw(p.Enable) == 1,
+			MonitorType:    derefStringRaw(p.MonitorType),
+			BoundInstances: derefInt64Raw(p.UseSum),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextCLSTopics(ctx context.Context) (string, error) {
+	client, err := newCLSClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.DescribeTopics(cls.NewDescribeTopicsRequest())
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.Topics) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID         string `json:"id"`
+		Name       string `json:"name,omitempty"`
+		LogsetID   string `json:"logset_id,omitempty"`
+		Partitions int64  `json:"partitions"`
+		Index      bool   `json:"index"`
+		Created    string `json:"created_at,omitempty"`
+	}
+	var slim []s
+	for _, t := range resp.Response.Topics {
+		slim = append(slim, s{
+			ID:         derefStringRaw(t.TopicId),
+			Name:       derefStringRaw(t.TopicName),
+			LogsetID:   derefStringRaw(t.LogsetId),
+			Partitions: derefInt64Raw(t.PartitionCount),
+			Index:      derefBool(t.Index),
+			Created:    derefStringRaw(t.CreateTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextCloudAudit(ctx context.Context) (string, error) {
+	client, err := newCloudAuditClient(c)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.ListAudits(cloudaudit.NewListAuditsRequest())
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.AuditSummarys) == 0 {
+		return "", nil
+	}
+	type s struct {
+		Name      string `json:"name"`
+		Enabled   bool   `json:"enabled"`
+		COSBucket string `json:"cos_bucket,omitempty"`
+		Prefix    string `json:"log_prefix,omitempty"`
+	}
+	var slim []s
+	for _, a := range resp.Response.AuditSummarys {
+		slim = append(slim, s{
+			Name:      derefStringRaw(a.AuditName),
+			Enabled:   derefInt64Raw(a.AuditStatus) == 1,
+			COSBucket: derefStringRaw(a.CosBucketName),
+			Prefix:    derefStringRaw(a.LogFilePrefix),
 		})
 	}
 	b, err := json.Marshal(slim)

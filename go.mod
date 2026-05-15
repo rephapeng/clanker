@@ -120,9 +120,12 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cbs v1.3.96 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn v1.3.90 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/clb v1.3.83 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cloudaudit v1.3.40 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cls v1.3.97 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cynosdb v1.3.98 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dc v1.3.96 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/mongodb v1.3.93 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor v1.3.96 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/redis v1.3.79 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.94 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo v1.3.93 // indirect

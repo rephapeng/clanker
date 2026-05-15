@@ -50,6 +50,11 @@ func (c *Client) JSONVPNGateways(ctx context.Context) (string, error) { return c
 func (c *Client) JSONCCNs(ctx context.Context) (string, error)        { return c.contextCCN(ctx) }
 func (c *Client) JSONDirectConnects(ctx context.Context) (string, error) { return c.contextDC(ctx) }
 
+
+func (c *Client) JSONAlarmPolicies(ctx context.Context) (string, error)  { return c.contextAlarmPolicies(ctx) }
+func (c *Client) JSONCLSTopics(ctx context.Context) (string, error)      { return c.contextCLSTopics(ctx) }
+func (c *Client) JSONCloudAudit(ctx context.Context) (string, error)     { return c.contextCloudAudit(ctx) }
+
 // JSONSGRules returns the ingress + egress policies of a single security
 // group plus a `risk` label on each ingress rule that exposes a sensitive
 // port to the public internet. Wraps DescribeSecurityGroupPolicies.

@@ -51,6 +51,9 @@ Supported resources:
   vpn, vpn-gateway            - VPN gateways
   ccn                         - Cloud Connect Networks (account-global)
   dc, direct-connect          - Direct Connect physical lines
+  monitor, alarms             - Cloud Monitor alarm policies
+  cls, logs                   - CLS log topics
+  cloudaudit, audit, tracks   - Cloud Audit tracks (API-call log config)
 
 Use --all-regions to fan out across every available region (does not apply
 to cos, which uses a service-global endpoint).`,
@@ -132,8 +135,14 @@ to cos, which uses a service-global endpoint).`,
 				return listCCNs(client)
 			case "dc", "direct-connect", "directconnect":
 				return listDirectConnects(client, regions)
+			case "monitor", "alarm", "alarms", "alarm-policy":
+				return listAlarmPolicies(client, regions)
+			case "cls", "log", "logs", "log-topics":
+				return listCLSTopics(client, regions)
+			case "cloudaudit", "audit", "tracks":
+				return listCloudAuditTracks(client)
 			default:
-				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam, redis, mongodb, cynosdb, cdn, edgeone, waf, antiddos, nat, vpn, ccn, dc)", resourceType)
+				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam, redis, mongodb, cynosdb, cdn, edgeone, waf, antiddos, nat, vpn, ccn, dc, monitor, cls, cloudaudit)", resourceType)
 			}
 		},
 	}
