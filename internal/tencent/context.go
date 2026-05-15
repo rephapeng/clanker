@@ -9,6 +9,10 @@ import (
 	"time"
 
 	cdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb/v20170320"
+	ssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
+	cam "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam/v20190116"
+	cbs "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cbs/v20170312"
+	clb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/clb/v20180317"
 	cvm "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm/v20170312"
 	postgres "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/postgres/v20170312"
 	tke "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tke/v20180525"
@@ -67,6 +71,31 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 			name: "TKEClusters",
 			keys: []string{"tke", "kubernetes", "k8s", "cluster", "clusters", "pod", "node"},
 			run:  func() (string, error) { return c.contextTKE(ctx) },
+		},
+		{
+			name: "CLBs",
+			keys: []string{"clb", "load", "balancer", "lb"},
+			run:  func() (string, error) { return c.contextCLB(ctx) },
+		},
+		{
+			name: "EIPs",
+			keys: []string{"eip", "public", "address", "ip"},
+			run:  func() (string, error) { return c.contextEIP(ctx) },
+		},
+		{
+			name: "CBSVolumes",
+			keys: []string{"cbs", "disk", "volume", "storage", "encrypted"},
+			run:  func() (string, error) { return c.contextCBS(ctx) },
+		},
+		{
+			name: "SSLCertificates",
+			keys: []string{"ssl", "cert", "tls", "https", "expiry"},
+			run:  func() (string, error) { return c.contextSSL(ctx) },
+		},
+		{
+			name: "CAMUsers",
+			keys: []string{"cam", "iam", "user", "subaccount", "mfa", "identity"},
+			run:  func() (string, error) { return c.contextCAM(ctx) },
 		},
 	}
 
@@ -439,6 +468,234 @@ func derefUint64Raw(p *uint64) uint64 {
 		return 0
 	}
 	return *p
+}
+
+// Append to internal/tencent/context.go via the patcher. These reuse the
+// existing region-scoped client from c, mirror the slim JSON shape we use
+// for other resource types, and surface only the columns the dashboard or
+// LLM cares about.
+
+func (c *Client) contextCLB(ctx context.Context) (string, error) {
+	client, err := newCLBClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	req := clb.NewDescribeLoadBalancersRequest()
+	var offset, limit int64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeLoadBalancers(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.LoadBalancerSet) == 0 {
+		return "", nil
+	}
+	type lbSummary struct {
+		ID      string   `json:"id"`
+		Name    string   `json:"name"`
+		Type    string   `json:"type"`
+		Status  string   `json:"status"`
+		VIPs    []string `json:"vips,omitempty"`
+		VpcID   string   `json:"vpc_id,omitempty"`
+		Created string   `json:"created_at,omitempty"`
+	}
+	var slim []lbSummary
+	for _, lb := range resp.Response.LoadBalancerSet {
+		slim = append(slim, lbSummary{
+			ID:      derefStringRaw(lb.LoadBalancerId),
+			Name:    derefStringRaw(lb.LoadBalancerName),
+			Type:    derefStringRaw(lb.LoadBalancerType),
+			Status:  clbStatus(lb.Status),
+			VIPs:    stringSlice(lb.LoadBalancerVips),
+			VpcID:   derefStringRaw(lb.VpcId),
+			Created: derefStringRaw(lb.CreateTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextEIP(ctx context.Context) (string, error) {
+	client, err := c.VPC()
+	if err != nil {
+		return "", err
+	}
+	req := vpc.NewDescribeAddressesRequest()
+	var offset, limit int64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeAddresses(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.AddressSet) == 0 {
+		return "", nil
+	}
+	type eipSummary struct {
+		ID         string `json:"id"`
+		Name       string `json:"name,omitempty"`
+		IP         string `json:"ip"`
+		Status     string `json:"status"`
+		Type       string `json:"type,omitempty"`
+		InstanceID string `json:"instance_id,omitempty"`
+		Created    string `json:"created_at,omitempty"`
+	}
+	var slim []eipSummary
+	for _, a := range resp.Response.AddressSet {
+		slim = append(slim, eipSummary{
+			ID:         derefStringRaw(a.AddressId),
+			Name:       derefStringRaw(a.AddressName),
+			IP:         derefStringRaw(a.AddressIp),
+			Status:     derefStringRaw(a.AddressStatus),
+			Type:       derefStringRaw(a.AddressType),
+			InstanceID: derefStringRaw(a.InstanceId),
+			Created:    derefStringRaw(a.CreatedTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextCBS(ctx context.Context) (string, error) {
+	client, err := newCBSClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	req := cbs.NewDescribeDisksRequest()
+	var offset, limit uint64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeDisks(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.DiskSet) == 0 {
+		return "", nil
+	}
+	type diskSummary struct {
+		ID         string `json:"id"`
+		Name       string `json:"name,omitempty"`
+		Type       string `json:"type"`
+		SizeGB     uint64 `json:"size_gb"`
+		State      string `json:"state"`
+		Encrypted  bool   `json:"encrypted"`
+		InstanceID string `json:"instance_id,omitempty"`
+		Zone       string `json:"zone,omitempty"`
+	}
+	var slim []diskSummary
+	for _, d := range resp.Response.DiskSet {
+		zone := ""
+		if d.Placement != nil {
+			zone = derefStringRaw(d.Placement.Zone)
+		}
+		slim = append(slim, diskSummary{
+			ID:         derefStringRaw(d.DiskId),
+			Name:       derefStringRaw(d.DiskName),
+			Type:       derefStringRaw(d.DiskType),
+			SizeGB:     derefUint64Raw(d.DiskSize),
+			State:      derefStringRaw(d.DiskState),
+			Encrypted:  derefBool(d.Encrypt),
+			InstanceID: derefStringRaw(d.InstanceId),
+			Zone:       zone,
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextSSL(ctx context.Context) (string, error) {
+	client, err := newSSLClient(c)
+	if err != nil {
+		return "", err
+	}
+	req := ssl.NewDescribeCertificatesRequest()
+	var offset, limit uint64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeCertificates(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.Certificates) == 0 {
+		return "", nil
+	}
+	type certSummary struct {
+		ID         string `json:"id"`
+		Alias      string `json:"alias,omitempty"`
+		Domain     string `json:"domain,omitempty"`
+		Status     string `json:"status"`
+		From       string `json:"from,omitempty"`
+		CertEnd    string `json:"cert_end,omitempty"`
+		DaysLeft   int    `json:"days_left"`
+	}
+	var slim []certSummary
+	for _, cert := range resp.Response.Certificates {
+		slim = append(slim, certSummary{
+			ID:       derefStringRaw(cert.CertificateId),
+			Alias:    derefStringRaw(cert.Alias),
+			Domain:   derefStringRaw(cert.Domain),
+			Status:   sslStatus(cert.Status),
+			From:     derefStringRaw(cert.From),
+			CertEnd:  derefStringRaw(cert.CertEndTime),
+			DaysLeft: daysUntilExpiry(cert.CertEndTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextCAM(ctx context.Context) (string, error) {
+	client, err := newCAMClient(c)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.ListUsers(cam.NewListUsersRequest())
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.Data) == 0 {
+		return "", nil
+	}
+	type userSummary struct {
+		UID          uint64 `json:"uid"`
+		Name         string `json:"name"`
+		NickName     string `json:"nickname,omitempty"`
+		Email        string `json:"email,omitempty"`
+		ConsoleLogin bool   `json:"console_login"`
+		PhoneSet     bool   `json:"phone_set"`
+		Created      string `json:"created_at,omitempty"`
+	}
+	var slim []userSummary
+	for _, u := range resp.Response.Data {
+		phone := derefStringRaw(u.PhoneNum)
+		slim = append(slim, userSummary{
+			UID:          derefUint64Raw(u.Uid),
+			Name:         derefStringRaw(u.Name),
+			NickName:     derefStringRaw(u.NickName),
+			Email:        derefStringRaw(u.Email),
+			ConsoleLogin: derefUint64Raw(u.ConsoleLogin) == 1,
+			PhoneSet:     phone != "",
+			Created:      derefStringRaw(u.CreateTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // derefStringRaw returns the raw pointer value or empty string — used by

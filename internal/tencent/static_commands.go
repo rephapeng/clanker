@@ -35,6 +35,11 @@ Supported resources:
   postgres, pg, postgresql    - TencentDB for PostgreSQL instances
   cos, buckets                - COS object storage buckets (service-global)
   tke, k8s, clusters          - TKE (Tencent Kubernetes Engine) clusters
+  clb, lbs, lb                - Cloud Load Balancers
+  eip, eips, addresses        - Elastic IPs
+  cbs, disks, volumes         - Cloud Block Storage volumes
+  ssl, certs, certificates    - SSL certificates (service-global)
+  cam, iam, users             - CAM sub-account users (account-global)
 
 Use --all-regions to fan out across every available region (does not apply
 to cos, which uses a service-global endpoint).`,
@@ -84,8 +89,18 @@ to cos, which uses a service-global endpoint).`,
 				return listCOSBuckets(client)
 			case "tke", "k8s", "cluster", "clusters", "kubernetes":
 				return listTKEClusters(client, regions)
+			case "clb", "lb", "lbs", "load-balancer", "load-balancers":
+				return listCLBs(client, regions)
+			case "eip", "eips", "address", "addresses":
+				return listEIPs(client, regions)
+			case "cbs", "disk", "disks", "volume", "volumes":
+				return listCBS(client, regions)
+			case "ssl", "cert", "certs", "certificate", "certificates":
+				return listSSLCerts(client)
+			case "cam", "iam", "user", "users":
+				return listCAMUsers(client)
 			default:
-				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke)", resourceType)
+				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam)", resourceType)
 			}
 		},
 	}

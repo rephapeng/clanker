@@ -115,6 +115,10 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam v1.3.42 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cbs v1.3.96 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/clb v1.3.83 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.94 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

@@ -13,6 +13,16 @@ import {
   getApiUrl,
   getHealth,
   getPublicExposure,
+  getCAMHygiene,
+  getCertExpiry,
+  getUnencryptedCBS,
+  getIdleEIPs,
+  getCLBExposure,
+  CAMHygieneItem,
+  ExpiringCert,
+  UnencryptedCBSItem,
+  IdleEIPItem,
+  CLBExposureItem,
   getRegions,
   getResources,
   getSGRules,
@@ -39,6 +49,11 @@ const RESOURCE_TYPES = [
   "postgres",
   "cos",
   "tke",
+  "clb",
+  "eip",
+  "cbs",
+  "ssl",
+  "cam",
 ];
 
 export default function App() {
@@ -494,96 +509,94 @@ function groupTopology(data: Topology) {
 function SecurityScanView() {
   const [region, setRegion] = useState("ap-singapore");
   const regions = useRegions();
-  const [items, setItems] = useState<ExposedCVM[] | null>(null);
-  const [err, setErr] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-
-  async function runScan() {
-    setLoading(true);
-    setErr("");
-    setItems(null);
-    const r = await getPublicExposure(region);
-    setLoading(false);
-    if (!r.ok) {
-      setErr(`${r.code}: ${r.message}`);
-      return;
-    }
-    setItems(r.data.items ?? []);
-  }
+  const [tab, setTab] = useState<"public-exposure" | "clb" | "eip" | "cbs" | "ssl" | "cam">("public-exposure");
 
   return (
     <section>
       <h1 className="text-2xl font-semibold mb-1">Security scan</h1>
       <p className="text-slate-400 text-sm mb-6">
-        For every CVM with a public IP in the region, flags inbound SG rules that allow 0.0.0.0/0 (or ::/0) on
-        sensitive ports (22, 3306, 3389, 5432, 6379, 9200, 27017, or "all ports").
+        Six built-in audits. Pick a tab, choose a region (if applicable), and Run.
+        SSL + CAM audits are account-global and ignore the region selector.
       </p>
-      <div className="flex gap-3 items-end mb-6">
-        <Field label="Region">
-          <RegionSelect value={region} onChange={setRegion} regions={regions} />
-        </Field>
-        <button
-          onClick={() => void runScan()}
-          className="bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 rounded text-sm font-medium"
-          disabled={loading}
-        >
-          {loading ? "Scanning..." : "Run scan"}
-        </button>
+
+      <div className="flex gap-1 mb-6 flex-wrap">
+        {([
+          ["public-exposure", "Public CVM exposure"],
+          ["clb", "CLB exposure"],
+          ["eip", "Idle EIPs"],
+          ["cbs", "Unencrypted CBS"],
+          ["ssl", "Cert expiry"],
+          ["cam", "CAM hygiene"],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={
+              "px-3 py-1.5 rounded text-sm transition " +
+              (tab === id
+                ? "bg-slate-700 text-white"
+                : "bg-slate-900 text-slate-300 hover:bg-slate-800")
+            }
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {err && <ErrorBox message={err} />}
-      {items && items.length === 0 && (
-        <Empty message="No publicly-exposed sensitive ports found in this region. ✓" />
+      {(tab === "public-exposure" || tab === "clb" || tab === "eip" || tab === "cbs") && (
+        <div className="flex gap-3 items-end mb-6">
+          <Field label="Region">
+            <RegionSelect value={region} onChange={setRegion} regions={regions} />
+          </Field>
+        </div>
       )}
+
+      {tab === "public-exposure" && <PublicCVMExposureSection region={region} />}
+      {tab === "clb" && <CLBExposureSection region={region} />}
+      {tab === "eip" && <IdleEIPSection region={region} />}
+      {tab === "cbs" && <UnencryptedCBSSection region={region} />}
+      {tab === "ssl" && <CertExpirySection />}
+      {tab === "cam" && <CAMHygieneSection />}
+    </section>
+  );
+}
+
+function PublicCVMExposureSection({ region }: { region: string }) {
+  const [items, setItems] = useState<ExposedCVM[] | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setItems(null);
+    const r = await getPublicExposure(region);
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setItems(r.data.items ?? []);
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && <Empty message="No publicly-exposed sensitive ports found in this region. ✓" />}
       {items && items.length > 0 && (
-        <div className="space-y-4">
-          <div className="text-sm">
-            <span className="text-rose-400 font-medium">{items.length}</span> CVM(s) have public exposure on sensitive ports.
-          </div>
+        <div className="space-y-4 mt-4">
+          <div className="text-sm"><span className="text-rose-400 font-medium">{items.length}</span> CVM(s) have public exposure on sensitive ports.</div>
           {items.map((cvm) => (
             <div key={cvm.instance_id} className="border border-rose-800 rounded-lg p-4 bg-rose-950/20">
               <div className="flex items-baseline flex-wrap gap-3 mb-3">
                 <span className="font-semibold">{cvm.name || cvm.instance_id}</span>
                 <span className="font-mono text-xs text-slate-400">{cvm.instance_id}</span>
-                <span className="text-xs">
-                  <span className="text-slate-400">public:</span>{" "}
-                  <span className="font-mono">{cvm.public_ip}</span>
-                </span>
-                <span className="text-xs">
-                  <span className="text-slate-400">private:</span>{" "}
-                  <span className="font-mono">{cvm.private_ip ?? "-"}</span>
-                </span>
-                <span className="text-xs">
-                  <span className="text-slate-400">state:</span>{" "}
-                  <span className={cvm.state === "RUNNING" ? "text-emerald-400" : "text-slate-300"}>{cvm.state}</span>
-                </span>
-                <span className="text-xs">
-                  <span className="text-slate-400">SGs:</span>{" "}
-                  <span className="font-mono">{cvm.sg_ids.join(", ")}</span>
-                </span>
+                <span className="text-xs"><span className="text-slate-400">public:</span> <span className="font-mono">{cvm.public_ip}</span></span>
+                <span className="text-xs"><span className="text-slate-400">state:</span> <span className={cvm.state === "RUNNING" ? "text-emerald-400" : "text-slate-300"}>{cvm.state}</span></span>
               </div>
               <table className="w-full text-xs">
                 <thead className="text-left text-slate-400 border-b border-slate-800">
-                  <tr>
-                    <Th>SG</Th>
-                    <Th>Proto</Th>
-                    <Th>Port</Th>
-                    <Th>Source</Th>
-                    <Th>Risk</Th>
-                    <Th>Description</Th>
-                  </tr>
+                  <tr><Th>SG</Th><Th>Proto</Th><Th>Port</Th><Th>Source</Th><Th>Risk</Th><Th>Description</Th></tr>
                 </thead>
                 <tbody>
                   {cvm.risky_rules.map((r, i) => (
                     <tr key={i} className="border-b border-slate-900">
-                      <Td>{r.sg_id}</Td>
-                      <Td>{r.protocol ?? "-"}</Td>
-                      <Td>{r.port ?? "-"}</Td>
-                      <Td>{r.source ?? "-"}</Td>
-                      <Td>
-                        <span className="text-rose-400 font-medium">{r.risk}</span>
-                      </Td>
-                      <Td>{r.description ?? "-"}</Td>
+                      <Td>{r.sg_id}</Td><Td>{r.protocol ?? "-"}</Td><Td>{r.port ?? "-"}</Td><Td>{r.source ?? "-"}</Td>
+                      <Td><span className="text-rose-400 font-medium">{r.risk}</span></Td><Td>{r.description ?? "-"}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -592,9 +605,221 @@ function SecurityScanView() {
           ))}
         </div>
       )}
-    </section>
+    </>
   );
 }
+
+function CLBExposureSection({ region }: { region: string }) {
+  const [items, setItems] = useState<CLBExposureItem[] | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setItems(null);
+    const r = await getCLBExposure(region);
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setItems(r.data.items ?? []);
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && <Empty message="No public-facing CLBs found in this region." />}
+      {items && items.length > 0 && (
+        <div className="space-y-3 mt-4">
+          {items.map((lb) => (
+            <div key={lb.lb_id} className={"border rounded-lg p-4 " + (lb.risky_count > 0 ? "border-rose-800 bg-rose-950/20" : "border-slate-800 bg-slate-900/40")}>
+              <div className="flex items-baseline flex-wrap gap-3 mb-3">
+                <span className="font-semibold">{lb.name || lb.lb_id}</span>
+                <span className="font-mono text-xs text-slate-400">{lb.lb_id}</span>
+                <span className="text-xs"><span className="text-slate-400">type:</span> {lb.type}</span>
+                <span className="text-xs"><span className="text-slate-400">VIPs:</span> <span className="font-mono">{(lb.vips ?? []).join(", ") || "-"}</span></span>
+                {lb.risky_count > 0 && <span className="text-xs text-rose-400">{lb.risky_count} risky listener(s)</span>}
+              </div>
+              {lb.listeners && lb.listeners.length > 0 && (
+                <table className="w-full text-xs">
+                  <thead className="text-left text-slate-400 border-b border-slate-800">
+                    <tr><Th>Listener</Th><Th>Proto</Th><Th>Port</Th><Th>Risk</Th></tr>
+                  </thead>
+                  <tbody>
+                    {lb.listeners.map((l) => (
+                      <tr key={l.listener_id} className={"border-b border-slate-900 " + (l.risk ? "bg-rose-950/40" : "")}>
+                        <Td>{l.name || l.listener_id}</Td><Td>{l.protocol}</Td><Td>{l.port}</Td>
+                        <Td>{l.risk ? <span className="text-rose-400 font-medium">{l.risk}</span> : <span className="text-slate-600">-</span>}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function IdleEIPSection({ region }: { region: string }) {
+  const [items, setItems] = useState<IdleEIPItem[] | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setItems(null);
+    const r = await getIdleEIPs(region);
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setItems(r.data.items ?? []);
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && <Empty message="No idle (UNBIND) EIPs in this region. ✓" />}
+      {items && items.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm mb-3"><span className="text-amber-400 font-medium">{items.length}</span> EIP(s) are unbound (paying without serving traffic).</div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>EIP_ID</Th><Th>Name</Th><Th>IP</Th><Th>Status</Th><Th>Type</Th><Th>Created</Th></tr></thead>
+            <tbody>
+              {items.map((e) => (
+                <tr key={e.id} className="border-b border-slate-900 bg-amber-950/10">
+                  <Td>{e.id}</Td><Td>{e.name ?? "-"}</Td><Td>{e.ip}</Td><Td>{e.status}</Td><Td>{e.type ?? "-"}</Td><Td>{e.created_at ?? "-"}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function UnencryptedCBSSection({ region }: { region: string }) {
+  const [items, setItems] = useState<UnencryptedCBSItem[] | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setItems(null);
+    const r = await getUnencryptedCBS(region);
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setItems(r.data.items ?? []);
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && <Empty message="All CBS volumes in this region are encrypted. ✓" />}
+      {items && items.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm mb-3"><span className="text-rose-400 font-medium">{items.length}</span> unencrypted CBS volume(s).</div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>Disk ID</Th><Th>Name</Th><Th>Type</Th><Th>Size GB</Th><Th>State</Th><Th>Instance</Th><Th>Zone</Th></tr></thead>
+            <tbody>
+              {items.map((d) => (
+                <tr key={d.id} className={"border-b border-slate-900 " + (d.unattached ? "bg-amber-950/20" : "bg-rose-950/10")}>
+                  <Td>{d.id}</Td><Td>{d.name ?? "-"}</Td><Td>{d.type}</Td><Td>{d.size_gb}</Td>
+                  <Td>{d.state}{d.unattached && <span className="ml-2 text-amber-400 text-[10px] uppercase">unattached</span>}</Td>
+                  <Td>{d.instance_id ?? "-"}</Td><Td>{d.zone ?? "-"}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function CertExpirySection() {
+  const [days, setDays] = useState(30);
+  const [items, setItems] = useState<ExpiringCert[] | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setItems(null);
+    const r = await getCertExpiry(days);
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setItems(r.data.items ?? []);
+  }
+  return (
+    <>
+      <div className="flex gap-3 items-end mb-6">
+        <Field label="Days threshold">
+          <input type="number" value={days} onChange={(e) => setDays(parseInt(e.target.value) || 30)} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 w-24" />
+        </Field>
+        <ScanRunButton onClick={run} loading={loading} />
+      </div>
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && <Empty message={`No SSL certificates expire within ${days} days. ✓`} />}
+      {items && items.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm mb-3"><span className="text-rose-400 font-medium">{items.length}</span> certificate(s) need attention.</div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>Cert ID</Th><Th>Alias</Th><Th>Domain</Th><Th>Status</Th><Th>Expires</Th><Th>Days left</Th></tr></thead>
+            <tbody>
+              {items.map((c) => (
+                <tr key={c.id} className={"border-b border-slate-900 " + (c.days_left < 0 ? "bg-rose-950/40" : c.days_left < 14 ? "bg-rose-950/20" : "bg-amber-950/10")}>
+                  <Td>{c.id}</Td><Td>{c.alias ?? "-"}</Td><Td>{c.domain ?? "-"}</Td><Td>{c.status}</Td>
+                  <Td>{c.cert_end ?? "-"}</Td>
+                  <Td><span className={c.days_left < 0 ? "text-rose-400 font-medium" : c.days_left < 14 ? "text-rose-300" : "text-amber-300"}>{c.days_left < 0 ? `EXPIRED ${-c.days_left}d` : `${c.days_left}d`}</span></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function CAMHygieneSection() {
+  const [data, setData] = useState<{ total_users: number; items: CAMHygieneItem[] } | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function run() {
+    setLoading(true); setErr(""); setData(null);
+    const r = await getCAMHygiene();
+    setLoading(false);
+    if (!r.ok) { setErr(`${r.code}: ${r.message}`); return; }
+    setData(r.data);
+  }
+  return (
+    <>
+      <ScanRunButton onClick={run} loading={loading} />
+      {err && <ErrorBox message={err} />}
+      {data && data.items.length === 0 && <Empty message={`All ${data.total_users} CAM user(s) have phone + email registered. ✓`} />}
+      {data && data.items.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm mb-3"><span className="text-rose-400 font-medium">{data.items.length}</span> of {data.total_users} CAM user(s) have hygiene findings.</div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-400 border-b border-slate-800"><tr><Th>UID</Th><Th>Name</Th><Th>Email</Th><Th>Console</Th><Th>Phone set</Th><Th>Findings</Th></tr></thead>
+            <tbody>
+              {data.items.map((u) => (
+                <tr key={u.uid} className="border-b border-slate-900 bg-rose-950/10">
+                  <Td>{u.uid}</Td><Td>{u.name}</Td><Td>{u.email || "-"}</Td>
+                  <Td>{u.console_login ? <span className="text-rose-400">yes</span> : <span className="text-emerald-400">no</span>}</Td>
+                  <Td>{u.phone_registered ? <span className="text-emerald-400">yes</span> : <span className="text-rose-400">no</span>}</Td>
+                  <Td><span className="text-xs">{u.findings.join(", ")}</span></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ScanRunButton({ onClick, loading }: { onClick: () => void; loading: boolean }) {
+  return (
+    <button onClick={onClick} disabled={loading} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 rounded text-sm font-medium">
+      {loading ? "Running..." : "Run scan"}
+    </button>
+  );
+}
+
 
 function SGAuditView() {
   const [sgID, setSGID] = useState("");

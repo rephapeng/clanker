@@ -202,3 +202,73 @@ export function getMakerHistory(limit?: number) {
   const q = limit ? `?limit=${limit}` : "";
   return call<ApplyRecord[]>(`/api/v1/maker/history${q}`);
 }
+
+export type CLBExposureItem = {
+  lb_id: string;
+  name?: string;
+  type: string;
+  vips?: string[];
+  listeners: { listener_id: string; name?: string; protocol: string; port: number; risk?: string }[];
+  risky_count: number;
+};
+
+export function getCLBExposure(region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<{ region: string; items: CLBExposureItem[] }>(`/api/v1/tencent/scan/clb-exposure${q}`);
+}
+
+export type IdleEIPItem = {
+  id: string;
+  name?: string;
+  ip: string;
+  status: string;
+  type?: string;
+  created_at?: string;
+};
+
+export function getIdleEIPs(region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<{ region: string; items: IdleEIPItem[] }>(`/api/v1/tencent/scan/idle-eips${q}`);
+}
+
+export type UnencryptedCBSItem = {
+  id: string;
+  name?: string;
+  type: string;
+  size_gb: number;
+  state: string;
+  instance_id?: string;
+  zone?: string;
+  unattached: boolean;
+};
+
+export function getUnencryptedCBS(region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<{ region: string; items: UnencryptedCBSItem[] }>(`/api/v1/tencent/scan/unencrypted-cbs${q}`);
+}
+
+export type ExpiringCert = {
+  id: string;
+  alias?: string;
+  domain?: string;
+  status: string;
+  cert_end?: string;
+  days_left: number;
+};
+
+export function getCertExpiry(days = 30) {
+  return call<{ threshold_days: number; items: ExpiringCert[] }>(`/api/v1/tencent/scan/cert-expiry?days=${days}`);
+}
+
+export type CAMHygieneItem = {
+  uid: number;
+  name: string;
+  email?: string;
+  console_login: boolean;
+  phone_registered: boolean;
+  findings: string[];
+};
+
+export function getCAMHygiene() {
+  return call<{ total_users: number; items: CAMHygieneItem[] }>(`/api/v1/tencent/scan/cam-hygiene`);
+}
