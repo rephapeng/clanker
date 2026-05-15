@@ -77,4 +77,7 @@ go.work.sum
 CLAUDE.md
 TODO.md
 PLANNING.md
-.claude/
+
+# Track project-level skills, ignore the rest of .claude (scratch state)
+.claude/*
+!.claude/skills/
