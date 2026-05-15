@@ -27,6 +27,7 @@ func init() {
 		anthropicKey           string
 		geminiKey              string
 		localModelInferenceURL string
+		noThinking             bool
 	)
 
 	serverCmd := &cobra.Command{
@@ -87,6 +88,9 @@ Examples:
 			if strings.TrimSpace(localModelInferenceURL) != "" {
 				viper.Set("ai.providers.openai.local_model_inference_url", strings.TrimSpace(localModelInferenceURL))
 			}
+			if noThinking {
+				viper.Set("ai.providers.openai.chat_template_kwargs", map[string]interface{}{"enable_thinking": false})
+			}
 
 			srv := api.New(api.Config{
 				Addr:       addr,
@@ -122,6 +126,7 @@ Examples:
 	serverCmd.Flags().StringVar(&anthropicKey, "anthropic-key", "", "Anthropic API key")
 	serverCmd.Flags().StringVar(&geminiKey, "gemini-key", "", "Gemini API key")
 	serverCmd.Flags().StringVar(&localModelInferenceURL, "local-model-inference-url", "", "OpenAI-compatible base URL for local/self-hosted models (e.g. https://x.runpod.net/v1)")
+	serverCmd.Flags().BoolVar(&noThinking, "no-thinking", false, "Disable Qwen3-style internal reasoning trace via chat_template_kwargs.enable_thinking=false. 14x faster plan generation with reasoning-capable models.")
 
 	rootCmd.AddCommand(serverCmd)
 }
