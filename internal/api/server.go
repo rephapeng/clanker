@@ -36,6 +36,7 @@ type Server struct {
 	mux    *http.ServeMux
 	logger *log.Logger
 	started time.Time
+	history *history
 }
 
 // New constructs a Server with the standard route set. Call Run to start.
@@ -55,7 +56,7 @@ func New(cfg Config, logger *log.Logger) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux(), logger: logger, started: time.Now()}
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), logger: logger, started: time.Now(), history: newHistory()}
 	s.registerRoutes()
 	return s
 }

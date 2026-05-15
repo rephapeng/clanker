@@ -5,8 +5,10 @@ import {
   ExposedCVM,
   SGRule,
   Topology,
+  ApplyRecord,
   applyPlan,
   generatePlan,
+  getMakerHistory,
   getApiToken,
   getApiUrl,
   getHealth,
@@ -26,6 +28,7 @@ type View =
   | "security-scan"
   | "sg-audit"
   | "maker"
+  | "activity"
   | "settings";
 
 const RESOURCE_TYPES = [
@@ -74,6 +77,7 @@ export default function App() {
           <NavBtn label="Security scan" active={view === "security-scan"} onClick={() => setView("security-scan")} />
           <NavBtn label="SG audit" active={view === "sg-audit"} onClick={() => setView("sg-audit")} />
           <NavBtn label="Maker" active={view === "maker"} onClick={() => setView("maker")} />
+          <NavBtn label="Activity" active={view === "activity"} onClick={() => setView("activity")} />
           <NavBtn label="Settings" active={view === "settings"} onClick={() => setView("settings")} />
         </nav>
         <div className="mt-auto text-xs text-slate-500 pt-6 leading-relaxed">
@@ -93,6 +97,7 @@ export default function App() {
         {view === "security-scan" && <SecurityScanView key={"scan-" + refreshKey} />}
         {view === "sg-audit" && <SGAuditView key={"sg-" + refreshKey} />}
         {view === "maker" && <MakerView key={"maker-" + refreshKey} />}
+        {view === "activity" && <ActivityView key={"activity-" + refreshKey} />}
         {view === "settings" && (
           <SettingsView
             onSaved={() => {
@@ -893,7 +898,7 @@ function MakerView() {
           </div>
           {result.error && <ErrorBox message={result.error} />}
           <pre className="bg-slate-900 border border-slate-800 rounded p-3 mt-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">
-            {result.output || "(no output)"}
+            {result.output ? formatApplyOutput(result.output) : "(no output)"}
           </pre>
         </div>
       )}
@@ -1018,4 +1023,181 @@ function Empty({ message }: { message: string }) {
 }
 
 // Re-export so api.ts types stay in scope.
+function ActivityView() {
+  const [items, setItems] = useState<ApplyRecord[] | null>(null);
+  const [err, setErr] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  async function fetchHistory() {
+    setLoading(true);
+    setErr("");
+    const r = await getMakerHistory(50);
+    setLoading(false);
+    if (!r.ok) {
+      setErr(`${r.code}: ${r.message}`);
+      return;
+    }
+    setItems(r.data);
+  }
+
+  useEffect(() => {
+    void fetchHistory();
+  }, []);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = setInterval(() => void fetchHistory(), 5000);
+    return () => clearInterval(t);
+  }, [autoRefresh]);
+
+  function toggle(id: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold mb-1">Activity</h1>
+      <p className="text-slate-400 text-sm mb-6">
+        In-memory record of recent applies made through this server (newest first, capped at 50).
+        Clears when the server restarts.
+      </p>
+      <div className="flex items-center gap-3 mb-6">
+        <button
+          onClick={() => void fetchHistory()}
+          className="bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 rounded text-sm font-medium"
+          disabled={loading}
+        >
+          {loading ? "Refreshing..." : "Refresh"}
+        </button>
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={(e) => setAutoRefresh(e.target.checked)}
+            className="accent-emerald-500"
+          />
+          <span>auto-refresh (5s)</span>
+        </label>
+        {items && (
+          <span className="text-xs text-slate-400 ml-auto">
+            {items.length} record{items.length === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
+
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && (
+        <Empty message="No applies recorded yet. Generate + apply a plan in Maker to see it here." />
+      )}
+      {items && items.length > 0 && (
+        <div className="space-y-2">
+          {items.map((r) => (
+            <div
+              key={r.id}
+              className={
+                "border rounded-lg overflow-hidden " +
+                (r.status === "error" ? "border-rose-800 bg-rose-950/20" : "border-slate-800 bg-slate-900/40")
+              }
+            >
+              <button
+                onClick={() => toggle(r.id)}
+                className="w-full text-left px-4 py-3 hover:bg-slate-800/40 transition"
+              >
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <span className="font-mono text-xs text-slate-500">#{r.id}</span>
+                  <span className="text-xs text-slate-400">{formatTimestamp(r.started_at)}</span>
+                  <span
+                    className={
+                      "text-xs font-medium " +
+                      (r.status === "ok" ? "text-emerald-400" : "text-rose-400")
+                    }
+                  >
+                    {r.status === "ok" ? "✓ ok" : "✗ error"}
+                  </span>
+                  {r.destroyer && (
+                    <span className="text-[10px] uppercase bg-rose-900/60 border border-rose-700 text-rose-200 px-1.5 py-0.5 rounded">
+                      destroyer
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-400">
+                    {r.command_count} cmd{r.command_count === 1 ? "" : "s"}
+                  </span>
+                  {r.destructive_count > 0 && (
+                    <span className="text-xs text-rose-400">
+                      {r.destructive_count} destructive
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-400">{r.duration}</span>
+                  <span className="text-xs text-slate-300 truncate">
+                    {r.summary || r.question || "(no summary)"}
+                  </span>
+                </div>
+                {r.error && (
+                  <div className="mt-1 text-xs text-rose-300 break-all">{r.error}</div>
+                )}
+              </button>
+              {expanded.has(r.id) && (
+                <div className="px-4 pb-4 border-t border-slate-800/60">
+                  {r.question && (
+                    <div className="mt-3 text-xs">
+                      <span className="text-slate-400">question:</span>{" "}
+                      <span className="text-slate-200">{r.question}</span>
+                    </div>
+                  )}
+                  <div className="mt-3 text-xs text-slate-400">output:</div>
+                  <pre className="bg-slate-950/80 border border-slate-800 rounded p-3 mt-1 text-xs overflow-x-auto whitespace-pre-wrap">
+                    {r.output ? formatApplyOutput(r.output) : "(no output)"}
+                  </pre>
+                  {r.output_truncated && (
+                    <div className="text-xs text-amber-400 mt-1">
+                      output truncated server-side at 16 KiB
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function formatApplyOutput(out: string): string {
+  // Lines emitted by ExecuteTencentPlan are either "[maker] ..." or a raw
+  // JSON response from the Tencent SDK. Pretty-print the JSON ones so the
+  // dashboard's <pre> isn't a single horizontal river of text.
+  return out
+    .split(/\n/)
+    .map((line) => {
+      const t = line.trim();
+      if (!t) return line;
+      if (t.startsWith("{") || t.startsWith("[")) {
+        try {
+          return JSON.stringify(JSON.parse(t), null, 2);
+        } catch {
+          return line;
+        }
+      }
+      return line;
+    })
+    .join("\n");
+}
+
 export type { ApiResult, SGRule };

@@ -181,3 +181,24 @@ export function generatePlan(question: string, destroyer: boolean) {
     body: JSON.stringify({ provider: "tencent", question, destroyer }),
   });
 }
+
+export type ApplyRecord = {
+  id: number;
+  started_at: string;
+  provider: string;
+  status: "ok" | "error";
+  duration: string;
+  destroyer: boolean;
+  command_count: number;
+  destructive_count: number;
+  summary?: string;
+  question?: string;
+  error?: string;
+  output?: string;
+  output_truncated?: boolean;
+};
+
+export function getMakerHistory(limit?: number) {
+  const q = limit ? `?limit=${limit}` : "";
+  return call<ApplyRecord[]>(`/api/v1/maker/history${q}`);
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ type applyResponse struct {
 	Output   string `json:"output"`
 	Error    string `json:"error,omitempty"`
 	Duration string `json:"duration"`
+	HistoryID int64 `json:"history_id,omitempty"`
 }
 
 func (s *Server) handleMakerApply(w http.ResponseWriter, r *http.Request) {
@@ -85,17 +87,81 @@ func (s *Server) handleMakerApply(w http.ResponseWriter, r *http.Request) {
 		Destroyer:        req.Destroyer,
 		Debug:            s.cfg.Debug,
 	})
-	resp := applyResponse{
-		Provider: provider,
-		Output:   buf.String(),
-		Duration: time.Since(start).Round(time.Millisecond).String(),
+	duration := time.Since(start).Round(time.Millisecond)
+
+	// Build history record (regardless of success/failure so audit trail is
+	// complete).
+	rec := ApplyRecord{
+		StartedAt:        start,
+		Provider:         provider,
+		Duration:         duration.String(),
+		Destroyer:        req.Destroyer,
+		CommandCount:     len(plan.Commands),
+		DestructiveCount: countDestructiveCommands(plan.Commands),
+		Summary:          strings.TrimSpace(plan.Summary),
+		Question:         strings.TrimSpace(plan.Question),
+		Output:           buf.String(),
 	}
 	if execErr != nil {
-		resp.Status = "error"
+		rec.Status = "error"
+		rec.Error = execErr.Error()
+	} else {
+		rec.Status = "ok"
+	}
+	if s.history != nil {
+		rec = s.history.append(rec)
+	}
+
+	resp := applyResponse{
+		Provider:  provider,
+		Output:    buf.String(),
+		Duration:  duration.String(),
+		Status:    rec.Status,
+		HistoryID: rec.ID,
+	}
+	if execErr != nil {
 		resp.Error = execErr.Error()
-		writeJSON(w, http.StatusOK, map[string]interface{}{"data": resp})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"data": resp})
+}
+
+// handleMakerHistory returns the in-memory ring buffer of past applies
+// (newest first). Supports ?limit=N to cap the response size.
+func (s *Server) handleMakerHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 0
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if s.history == nil {
+		writeData(w, []ApplyRecord{})
 		return
 	}
-	resp.Status = "ok"
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": resp})
+	writeData(w, s.history.list(limit))
+}
+
+// countDestructiveCommands inspects each Tencent plan command's action arg
+// (args[2]) and counts the ones matching destructive prefixes. Mirrors the
+// classifier used by the dashboard preview and the executor's safety gate.
+func countDestructiveCommands(cmds []maker.Command) int {
+	n := 0
+	prefixes := []string{"Terminate", "Delete", "Destroy", "Reset", "Release", "Discontinue"}
+	for _, c := range cmds {
+		if len(c.Args) < 3 {
+			continue
+		}
+		action := c.Args[2]
+		for _, p := range prefixes {
+			if strings.HasPrefix(action, p) {
+				// ResetInstancesPassword is benign (just changes password).
+				if action == "ResetInstancesPassword" {
+					break
+				}
+				n++
+				break
+			}
+		}
+	}
+	return n
 }
