@@ -165,3 +165,19 @@ export function getPublicExposure(region: string) {
   const q = region ? `?region=${encodeURIComponent(region)}` : "";
   return call<{ region: string; items: ExposedCVM[] }>(`/api/v1/tencent/scan/public-exposure${q}`);
 }
+
+export type GeneratedPlan = {
+  provider: string;
+  plan: unknown;
+  model?: string;
+  ai_profile?: string;
+  duration: string;
+};
+
+export function generatePlan(question: string, destroyer: boolean) {
+  return call<GeneratedPlan>("/api/v1/maker/plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider: "tencent", question, destroyer }),
+  });
+}
