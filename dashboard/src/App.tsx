@@ -2,20 +2,30 @@ import { useEffect, useState } from "react";
 import {
   ApiResult,
   ApplyResult,
+  ExposedCVM,
   SGRule,
+  Topology,
   applyPlan,
   getApiToken,
   getApiUrl,
   getHealth,
+  getPublicExposure,
   getRegions,
   getResources,
   getSGRules,
+  getTopology,
   getVersion,
   setApiToken,
   setApiUrl,
 } from "./api";
 
-type View = "resources" | "sg-audit" | "maker" | "settings";
+type View =
+  | "resources"
+  | "topology"
+  | "security-scan"
+  | "sg-audit"
+  | "maker"
+  | "settings";
 
 const RESOURCE_TYPES = [
   "cvm",
@@ -59,6 +69,8 @@ export default function App() {
         <div className="text-xs text-slate-400 mb-6">Tencent dashboard</div>
         <nav className="flex flex-col gap-1">
           <NavBtn label="Resources" active={view === "resources"} onClick={() => setView("resources")} />
+          <NavBtn label="Topology" active={view === "topology"} onClick={() => setView("topology")} />
+          <NavBtn label="Security scan" active={view === "security-scan"} onClick={() => setView("security-scan")} />
           <NavBtn label="SG audit" active={view === "sg-audit"} onClick={() => setView("sg-audit")} />
           <NavBtn label="Maker" active={view === "maker"} onClick={() => setView("maker")} />
           <NavBtn label="Settings" active={view === "settings"} onClick={() => setView("settings")} />
@@ -76,6 +88,8 @@ export default function App() {
       </aside>
       <main className="flex-1 p-8 overflow-x-auto">
         {view === "resources" && <ResourcesView key={"resources-" + refreshKey} />}
+        {view === "topology" && <TopologyView key={"topology-" + refreshKey} />}
+        {view === "security-scan" && <SecurityScanView key={"scan-" + refreshKey} />}
         {view === "sg-audit" && <SGAuditView key={"sg-" + refreshKey} />}
         {view === "maker" && <MakerView key={"maker-" + refreshKey} />}
         {view === "settings" && (
@@ -115,20 +129,49 @@ function NavBtn({
   );
 }
 
-function ResourcesView() {
-  const [type, setType] = useState("cvm");
-  const [region, setRegion] = useState("ap-singapore");
+function useRegions() {
   const [regions, setRegions] = useState<string[]>([]);
-  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
-  const [err, setErr] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-
   useEffect(() => {
     void (async () => {
       const r = await getRegions();
       if (r.ok) setRegions(r.data);
     })();
   }, []);
+  return regions;
+}
+
+function RegionSelect({
+  value,
+  onChange,
+  regions,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  regions: string[];
+}) {
+  return (
+    <select
+      className="bg-slate-800 border border-slate-700 rounded px-2 py-1"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {regions.length === 0 && <option value={value}>{value}</option>}
+      {regions.map((r) => (
+        <option key={r} value={r}>
+          {r}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function ResourcesView() {
+  const [type, setType] = useState("cvm");
+  const [region, setRegion] = useState("ap-singapore");
+  const regions = useRegions();
+  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
+  const [err, setErr] = useState<string>("");
+  const [loading, setLoading] = useState(false);
 
   async function fetchRows() {
     setLoading(true);
@@ -161,18 +204,7 @@ function ResourcesView() {
           </select>
         </Field>
         <Field label="Region">
-          <select
-            className="bg-slate-800 border border-slate-700 rounded px-2 py-1"
-            value={region}
-            onChange={(e) => setRegion(e.target.value)}
-          >
-            {regions.length === 0 && <option value={region}>{region}</option>}
-            {regions.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+          <RegionSelect value={region} onChange={setRegion} regions={regions} />
         </Field>
         <button
           onClick={() => void fetchRows()}
@@ -183,9 +215,377 @@ function ResourcesView() {
         </button>
       </div>
 
-      {err && <Error message={err} />}
+      {err && <ErrorBox message={err} />}
       {rows && rows.length === 0 && <Empty message="No resources of this type in the selected region." />}
       {rows && rows.length > 0 && <DynamicTable rows={rows} />}
+    </section>
+  );
+}
+
+function TopologyView() {
+  const [region, setRegion] = useState("ap-singapore");
+  const regions = useRegions();
+  const [data, setData] = useState<Topology | null>(null);
+  const [err, setErr] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+
+  async function fetchTopo() {
+    setLoading(true);
+    setErr("");
+    setData(null);
+    const r = await getTopology(region);
+    setLoading(false);
+    if (!r.ok) {
+      setErr(`${r.code}: ${r.message}`);
+      return;
+    }
+    setData(r.data);
+  }
+
+  // Group leaf resources by subnet/vpc for nested rendering.
+  const groups = data ? groupTopology(data) : null;
+
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold mb-1">Topology</h1>
+      <p className="text-slate-400 text-sm mb-6">
+        VPC → subnet → instance/DB tree for a single region. SGs are region-global so they appear once at the bottom.
+      </p>
+      <div className="flex gap-3 items-end mb-6">
+        <Field label="Region">
+          <RegionSelect value={region} onChange={setRegion} regions={regions} />
+        </Field>
+        <button
+          onClick={() => void fetchTopo()}
+          className="bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 rounded text-sm font-medium"
+          disabled={loading}
+        >
+          {loading ? "Loading..." : "Load topology"}
+        </button>
+      </div>
+
+      {err && <ErrorBox message={err} />}
+      {data && groups && (
+        <div className="space-y-4">
+          {data.warnings && data.warnings.length > 0 && (
+            <div className="bg-amber-900/30 border border-amber-700 rounded px-3 py-2 text-xs text-amber-200">
+              {data.warnings.length} warning(s): {data.warnings.slice(0, 3).join(" · ")}
+            </div>
+          )}
+
+          {data.vpcs.map((vpc) => (
+            <div key={vpc.id} className="border border-slate-700 rounded-lg p-4 bg-slate-900/40">
+              <div className="flex items-baseline gap-2 mb-3">
+                <span className="font-semibold">{vpc.name || vpc.id}</span>
+                <span className="font-mono text-xs text-slate-400">{vpc.id}</span>
+                <span className="font-mono text-xs text-slate-500">{vpc.cidr}</span>
+                {vpc.is_default && (
+                  <span className="text-[10px] uppercase bg-slate-700 px-1.5 py-0.5 rounded">default</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {groups.vpcSubnets.get(vpc.id)?.map((subnet) => (
+                  <div key={subnet.id} className="border border-slate-800 rounded p-3 bg-slate-950/60">
+                    <div className="flex items-baseline gap-2 mb-2">
+                      <span className="text-sm font-medium">{subnet.name || subnet.id}</span>
+                      <span className="font-mono text-[10px] text-slate-500">{subnet.cidr}</span>
+                      <span className="font-mono text-[10px] text-slate-500">{subnet.zone}</span>
+                    </div>
+                    <Chips items={groups.subnetCVMs.get(subnet.id) ?? []} kind="cvm" />
+                  </div>
+                )) ?? <div className="text-xs text-slate-500">no subnets</div>}
+              </div>
+
+              <DBRow vpcID={vpc.id} mysql={groups.vpcMySQL.get(vpc.id) ?? []} postgres={groups.vpcPostgres.get(vpc.id) ?? []} />
+              <ClusterRow clusters={groups.vpcClusters.get(vpc.id) ?? []} />
+            </div>
+          ))}
+
+          {(groups.orphanCVMs.length > 0 ||
+            groups.orphanMySQL.length > 0 ||
+            groups.orphanPostgres.length > 0 ||
+            groups.orphanClusters.length > 0) && (
+            <div className="border border-amber-800 rounded-lg p-4 bg-amber-950/20">
+              <div className="font-semibold mb-2 text-amber-300">Orphaned (no VPC reference)</div>
+              {groups.orphanCVMs.length > 0 && (
+                <div className="mb-2">
+                  <div className="text-xs uppercase text-slate-400 mb-1">CVMs</div>
+                  <Chips items={groups.orphanCVMs} kind="cvm" />
+                </div>
+              )}
+              {groups.orphanMySQL.length > 0 && (
+                <div className="mb-2">
+                  <div className="text-xs uppercase text-slate-400 mb-1">MySQL</div>
+                  <Chips items={groups.orphanMySQL.map((m) => ({ id: m.id, name: m.name, state: m.status }))} kind="db" />
+                </div>
+              )}
+              {groups.orphanPostgres.length > 0 && (
+                <div className="mb-2">
+                  <div className="text-xs uppercase text-slate-400 mb-1">Postgres</div>
+                  <Chips items={groups.orphanPostgres.map((m) => ({ id: m.id, name: m.name, state: m.status }))} kind="db" />
+                </div>
+              )}
+              {groups.orphanClusters.length > 0 && (
+                <div>
+                  <div className="text-xs uppercase text-slate-400 mb-1">TKE clusters</div>
+                  <Chips items={groups.orphanClusters.map((c) => ({ id: c.id, name: c.name, state: c.status }))} kind="tke" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {data.security_groups.length > 0 && (
+            <div className="border border-slate-800 rounded-lg p-4 bg-slate-900/40">
+              <div className="font-semibold mb-2">Security groups <span className="text-slate-400 font-normal text-sm">(region-global · {data.security_groups.length})</span></div>
+              <div className="flex flex-wrap gap-2">
+                {data.security_groups.map((sg) => (
+                  <span key={sg.id} className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs">
+                    <span className="font-mono text-slate-400 mr-2">{sg.id}</span>
+                    <span>{sg.name}</span>
+                    {sg.is_default && <span className="text-[10px] uppercase bg-slate-700 px-1 py-0.5 rounded ml-2">default</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Chips({
+  items,
+  kind,
+}: {
+  items: { id: string; name?: string; state?: string }[];
+  kind: "cvm" | "db" | "tke";
+}) {
+  if (items.length === 0) return <div className="text-xs text-slate-500">empty</div>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((it) => (
+        <span
+          key={it.id}
+          className={
+            "px-2 py-0.5 rounded text-[11px] font-mono border " +
+            chipColor(kind, it.state)
+          }
+          title={`${it.id} (${it.state ?? ""})`}
+        >
+          {it.name || it.id}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function chipColor(kind: "cvm" | "db" | "tke", state?: string) {
+  const running = state && /running|RUNNING/i.test(state);
+  if (kind === "cvm")
+    return running ? "border-emerald-700 bg-emerald-950/40 text-emerald-200" : "border-slate-700 bg-slate-800 text-slate-300";
+  if (kind === "db") return "border-sky-700 bg-sky-950/40 text-sky-200";
+  return "border-indigo-700 bg-indigo-950/40 text-indigo-200";
+}
+
+function DBRow({
+  vpcID: _,
+  mysql,
+  postgres,
+}: {
+  vpcID: string;
+  mysql: Topology["mysql"];
+  postgres: Topology["postgres"];
+}) {
+  if (mysql.length === 0 && postgres.length === 0) return null;
+  return (
+    <div className="mt-3 flex flex-wrap gap-3">
+      {mysql.length > 0 && (
+        <div>
+          <div className="text-xs uppercase text-slate-400 mb-1">MySQL</div>
+          <Chips items={mysql.map((m) => ({ id: m.id, name: m.name, state: m.status }))} kind="db" />
+        </div>
+      )}
+      {postgres.length > 0 && (
+        <div>
+          <div className="text-xs uppercase text-slate-400 mb-1">Postgres</div>
+          <Chips items={postgres.map((m) => ({ id: m.id, name: m.name, state: m.status }))} kind="db" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClusterRow({ clusters }: { clusters: Topology["clusters"] }) {
+  if (clusters.length === 0) return null;
+  return (
+    <div className="mt-3">
+      <div className="text-xs uppercase text-slate-400 mb-1">TKE clusters</div>
+      <Chips items={clusters.map((c) => ({ id: c.id, name: c.name, state: c.status }))} kind="tke" />
+    </div>
+  );
+}
+
+function groupTopology(data: Topology) {
+  const vpcSubnets = new Map<string, Topology["subnets"]>();
+  const subnetCVMs = new Map<string, { id: string; name: string; state: string }[]>();
+  const vpcMySQL = new Map<string, Topology["mysql"]>();
+  const vpcPostgres = new Map<string, Topology["postgres"]>();
+  const vpcClusters = new Map<string, Topology["clusters"]>();
+
+  for (const s of data.subnets) {
+    if (!s.vpc_id) continue;
+    const arr = vpcSubnets.get(s.vpc_id) ?? [];
+    arr.push(s);
+    vpcSubnets.set(s.vpc_id, arr);
+  }
+  const cvmsWithSubnet = new Set<string>();
+  for (const c of data.cvms) {
+    if (c.subnet_id) {
+      const arr = subnetCVMs.get(c.subnet_id) ?? [];
+      arr.push({ id: c.id, name: c.name, state: c.state });
+      subnetCVMs.set(c.subnet_id, arr);
+      cvmsWithSubnet.add(c.id);
+    }
+  }
+  for (const m of data.mysql) {
+    if (m.vpc_id) {
+      const arr = vpcMySQL.get(m.vpc_id) ?? [];
+      arr.push(m);
+      vpcMySQL.set(m.vpc_id, arr);
+    }
+  }
+  for (const m of data.postgres) {
+    if (m.vpc_id) {
+      const arr = vpcPostgres.get(m.vpc_id) ?? [];
+      arr.push(m);
+      vpcPostgres.set(m.vpc_id, arr);
+    }
+  }
+  for (const c of data.clusters) {
+    if (c.vpc_id) {
+      const arr = vpcClusters.get(c.vpc_id) ?? [];
+      arr.push(c);
+      vpcClusters.set(c.vpc_id, arr);
+    }
+  }
+  return {
+    vpcSubnets,
+    subnetCVMs,
+    vpcMySQL,
+    vpcPostgres,
+    vpcClusters,
+    orphanCVMs: data.cvms
+      .filter((c) => !cvmsWithSubnet.has(c.id))
+      .map((c) => ({ id: c.id, name: c.name, state: c.state })),
+    orphanMySQL: data.mysql.filter((m) => !m.vpc_id),
+    orphanPostgres: data.postgres.filter((m) => !m.vpc_id),
+    orphanClusters: data.clusters.filter((c) => !c.vpc_id),
+  };
+}
+
+function SecurityScanView() {
+  const [region, setRegion] = useState("ap-singapore");
+  const regions = useRegions();
+  const [items, setItems] = useState<ExposedCVM[] | null>(null);
+  const [err, setErr] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+
+  async function runScan() {
+    setLoading(true);
+    setErr("");
+    setItems(null);
+    const r = await getPublicExposure(region);
+    setLoading(false);
+    if (!r.ok) {
+      setErr(`${r.code}: ${r.message}`);
+      return;
+    }
+    setItems(r.data.items ?? []);
+  }
+
+  return (
+    <section>
+      <h1 className="text-2xl font-semibold mb-1">Security scan</h1>
+      <p className="text-slate-400 text-sm mb-6">
+        For every CVM with a public IP in the region, flags inbound SG rules that allow 0.0.0.0/0 (or ::/0) on
+        sensitive ports (22, 3306, 3389, 5432, 6379, 9200, 27017, or "all ports").
+      </p>
+      <div className="flex gap-3 items-end mb-6">
+        <Field label="Region">
+          <RegionSelect value={region} onChange={setRegion} regions={regions} />
+        </Field>
+        <button
+          onClick={() => void runScan()}
+          className="bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 rounded text-sm font-medium"
+          disabled={loading}
+        >
+          {loading ? "Scanning..." : "Run scan"}
+        </button>
+      </div>
+
+      {err && <ErrorBox message={err} />}
+      {items && items.length === 0 && (
+        <Empty message="No publicly-exposed sensitive ports found in this region. ✓" />
+      )}
+      {items && items.length > 0 && (
+        <div className="space-y-4">
+          <div className="text-sm">
+            <span className="text-rose-400 font-medium">{items.length}</span> CVM(s) have public exposure on sensitive ports.
+          </div>
+          {items.map((cvm) => (
+            <div key={cvm.instance_id} className="border border-rose-800 rounded-lg p-4 bg-rose-950/20">
+              <div className="flex items-baseline flex-wrap gap-3 mb-3">
+                <span className="font-semibold">{cvm.name || cvm.instance_id}</span>
+                <span className="font-mono text-xs text-slate-400">{cvm.instance_id}</span>
+                <span className="text-xs">
+                  <span className="text-slate-400">public:</span>{" "}
+                  <span className="font-mono">{cvm.public_ip}</span>
+                </span>
+                <span className="text-xs">
+                  <span className="text-slate-400">private:</span>{" "}
+                  <span className="font-mono">{cvm.private_ip ?? "-"}</span>
+                </span>
+                <span className="text-xs">
+                  <span className="text-slate-400">state:</span>{" "}
+                  <span className={cvm.state === "RUNNING" ? "text-emerald-400" : "text-slate-300"}>{cvm.state}</span>
+                </span>
+                <span className="text-xs">
+                  <span className="text-slate-400">SGs:</span>{" "}
+                  <span className="font-mono">{cvm.sg_ids.join(", ")}</span>
+                </span>
+              </div>
+              <table className="w-full text-xs">
+                <thead className="text-left text-slate-400 border-b border-slate-800">
+                  <tr>
+                    <Th>SG</Th>
+                    <Th>Proto</Th>
+                    <Th>Port</Th>
+                    <Th>Source</Th>
+                    <Th>Risk</Th>
+                    <Th>Description</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cvm.risky_rules.map((r, i) => (
+                    <tr key={i} className="border-b border-slate-900">
+                      <Td>{r.sg_id}</Td>
+                      <Td>{r.protocol ?? "-"}</Td>
+                      <Td>{r.port ?? "-"}</Td>
+                      <Td>{r.source ?? "-"}</Td>
+                      <Td>
+                        <span className="text-rose-400 font-medium">{r.risk}</span>
+                      </Td>
+                      <Td>{r.description ?? "-"}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -242,7 +642,7 @@ function SGAuditView() {
         </button>
       </div>
 
-      {err && <Error message={err} />}
+      {err && <ErrorBox message={err} />}
       {data && (
         <>
           <div className="mb-3 text-sm">
@@ -420,7 +820,7 @@ function MakerView() {
         </button>
       </div>
 
-      {err && <div className="mt-4"><Error message={err} /></div>}
+      {err && <div className="mt-4"><ErrorBox message={err} /></div>}
 
       {result && (
         <div className="mt-6">
@@ -434,7 +834,7 @@ function MakerView() {
               <span className="font-mono">{result.duration}</span>
             </span>
           </div>
-          {result.error && <Error message={result.error} />}
+          {result.error && <ErrorBox message={result.error} />}
           <pre className="bg-slate-900 border border-slate-800 rounded p-3 mt-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">
             {result.output || "(no output)"}
           </pre>
@@ -468,7 +868,7 @@ function SettingsView({ onSaved }: { onSaved: () => void }) {
           className="bg-slate-800 border border-slate-700 rounded px-2 py-1 w-full"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="http://127.0.0.1:8080"
+          placeholder="http://127.0.0.1:47180"
         />
       </Field>
       <div className="h-4" />
@@ -549,7 +949,7 @@ function Td({ children }: { children: React.ReactNode }) {
   return <td className="py-1.5 pr-4 align-top font-mono text-xs">{children}</td>;
 }
 
-function Error({ message }: { message: string }) {
+function ErrorBox({ message }: { message: string }) {
   return (
     <div className="bg-rose-900/30 border border-rose-700 rounded px-3 py-2 text-sm text-rose-200">
       {message}

@@ -114,3 +114,54 @@ export function applyPlan(plan: unknown, destroyer: boolean) {
     body: JSON.stringify({ provider: "tencent", plan, destroyer }),
   });
 }
+
+export type Topology = {
+  region: string;
+  vpcs: { id: string; name: string; cidr: string; is_default: boolean }[];
+  subnets: { id: string; name: string; cidr: string; zone: string; vpc_id: string }[];
+  cvms: {
+    id: string;
+    name: string;
+    state: string;
+    type: string;
+    zone?: string;
+    private_ip?: string;
+    public_ip?: string;
+    vpc_id?: string;
+    subnet_id?: string;
+    sg_ids?: string[];
+  }[];
+  security_groups: { id: string; name: string; description?: string; is_default: boolean }[];
+  mysql: { id: string; name: string; status?: string; engine?: string; vpc_id?: string; zone?: string }[];
+  postgres: { id: string; name: string; status?: string; engine?: string; vpc_id?: string; zone?: string }[];
+  clusters: { id: string; name: string; status?: string; k8s_version?: string; node_num?: number; vpc_id?: string }[];
+  warnings?: string[];
+};
+
+export function getTopology(region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<Topology>(`/api/v1/tencent/topology${q}`);
+}
+
+export type ExposedCVM = {
+  instance_id: string;
+  name: string;
+  state: string;
+  public_ip: string;
+  private_ip?: string;
+  sg_ids: string[];
+  risky_rules: {
+    sg_id: string;
+    sg_name?: string;
+    protocol?: string;
+    port?: string;
+    source?: string;
+    risk: string;
+    description?: string;
+  }[];
+};
+
+export function getPublicExposure(region: string) {
+  const q = region ? `?region=${encodeURIComponent(region)}` : "";
+  return call<{ region: string; items: ExposedCVM[] }>(`/api/v1/tencent/scan/public-exposure${q}`);
+}
