@@ -44,6 +44,12 @@ func (c *Client) JSONEdgeOne(ctx context.Context) (string, error)    { return c.
 func (c *Client) JSONWAF(ctx context.Context) (string, error)        { return c.contextWAF(ctx) }
 func (c *Client) JSONAntiDDoS(ctx context.Context) (string, error)   { return c.contextAntiDDoS(ctx) }
 
+
+func (c *Client) JSONNATGateways(ctx context.Context) (string, error) { return c.contextNAT(ctx) }
+func (c *Client) JSONVPNGateways(ctx context.Context) (string, error) { return c.contextVPN(ctx) }
+func (c *Client) JSONCCNs(ctx context.Context) (string, error)        { return c.contextCCN(ctx) }
+func (c *Client) JSONDirectConnects(ctx context.Context) (string, error) { return c.contextDC(ctx) }
+
 // JSONSGRules returns the ingress + egress policies of a single security
 // group plus a `risk` label on each ingress rule that exposes a sensitive
 // port to the public internet. Wraps DescribeSecurityGroupPolicies.

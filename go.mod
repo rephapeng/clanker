@@ -121,6 +121,7 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn v1.3.90 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/clb v1.3.83 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cynosdb v1.3.98 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dc v1.3.96 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/mongodb v1.3.93 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/redis v1.3.79 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.94 // indirect

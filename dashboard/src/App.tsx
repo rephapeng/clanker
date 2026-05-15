@@ -67,6 +67,10 @@ const RESOURCE_TYPES = [
   "edgeone",
   "waf",
   "antiddos",
+  "nat",
+  "vpn",
+  "ccn",
+  "dc",
 ];
 
 export default function App() {

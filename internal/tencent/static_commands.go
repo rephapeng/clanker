@@ -47,6 +47,10 @@ Supported resources:
   edgeone, teo, zones         - EdgeOne (TEO) zones (account-global)
   waf, waf-hosts              - WAF-protected hosts (account-global)
   antiddos, ddos              - Anti-DDoS Advanced (BGP-IP) instances
+  nat, nat-gateway            - NAT gateways
+  vpn, vpn-gateway            - VPN gateways
+  ccn                         - Cloud Connect Networks (account-global)
+  dc, direct-connect          - Direct Connect physical lines
 
 Use --all-regions to fan out across every available region (does not apply
 to cos, which uses a service-global endpoint).`,
@@ -120,8 +124,16 @@ to cos, which uses a service-global endpoint).`,
 				return listWAFHosts(client)
 			case "antiddos", "ddos":
 				return listAntiDDoS(client)
+			case "nat", "nat-gateway", "natgateway":
+				return listNATGateways(client, regions)
+			case "vpn", "vpn-gateway", "vpngateway":
+				return listVPNGateways(client, regions)
+			case "ccn", "cloud-connect":
+				return listCCNs(client)
+			case "dc", "direct-connect", "directconnect":
+				return listDirectConnects(client, regions)
 			default:
-				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam, redis, mongodb, cynosdb, cdn, edgeone, waf, antiddos)", resourceType)
+				return fmt.Errorf("unknown resource type: %s (supported: cvm, vpc, subnets, security-groups, mysql, postgres, cos, tke, clb, eip, cbs, ssl, cam, redis, mongodb, cynosdb, cdn, edgeone, waf, antiddos, nat, vpn, ccn, dc)", resourceType)
 			}
 		},
 	}

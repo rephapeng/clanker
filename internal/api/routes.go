@@ -164,6 +164,14 @@ func gatherTencentByType(ctx context.Context, client *tencent.Client, resourceTy
 		return client.JSONWAF(ctx)
 	case "antiddos", "ddos":
 		return client.JSONAntiDDoS(ctx)
+	case "nat", "nat-gateway", "natgateway":
+		return client.JSONNATGateways(ctx)
+	case "vpn", "vpn-gateway", "vpngateway":
+		return client.JSONVPNGateways(ctx)
+	case "ccn", "cloud-connect":
+		return client.JSONCCNs(ctx)
+	case "dc", "direct-connect", "directconnect":
+		return client.JSONDirectConnects(ctx)
 	default:
 		return "", fmt.Errorf("unsupported resource type %q", resourceType)
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	cdb "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb/v20170320"
+	dc "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dc/v20180410"
 	antiddos "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/antiddos/v20200309"
 	waf "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/waf/v20180125"
 	teo "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo/v20220901"
@@ -138,6 +139,26 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 			name: "AntiDDoSInstances",
 			keys: []string{"ddos", "antiddos", "attack"},
 			run:  func() (string, error) { return c.contextAntiDDoS(ctx) },
+		},
+		{
+			name: "NATGateways",
+			keys: []string{"nat", "egress", "outbound"},
+			run:  func() (string, error) { return c.contextNAT(ctx) },
+		},
+		{
+			name: "VPNGateways",
+			keys: []string{"vpn", "tunnel", "ipsec"},
+			run:  func() (string, error) { return c.contextVPN(ctx) },
+		},
+		{
+			name: "CCNs",
+			keys: []string{"ccn", "interconnect", "cloud-connect"},
+			run:  func() (string, error) { return c.contextCCN(ctx) },
+		},
+		{
+			name: "DirectConnects",
+			keys: []string{"dc", "direct-connect", "leased-line"},
+			run:  func() (string, error) { return c.contextDC(ctx) },
 		},
 	}
 
@@ -1041,6 +1062,175 @@ func (c *Client) contextAntiDDoS(ctx context.Context) (string, error) {
 			Region:  region,
 			Created: derefStringRaw(i.CreatedTime),
 			Expires: derefStringRaw(i.ExpiredTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+
+func (c *Client) contextNAT(ctx context.Context) (string, error) {
+	client, err := c.VPC()
+	if err != nil {
+		return "", err
+	}
+	req := vpc.NewDescribeNatGatewaysRequest()
+	var offset, limit uint64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeNatGateways(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.NatGatewaySet) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID                string   `json:"id"`
+		Name              string   `json:"name,omitempty"`
+		State             string   `json:"state"`
+		BandwidthOutMbps  uint64   `json:"bandwidth_out_mbps,omitempty"`
+		PublicIPs         []string `json:"public_ips,omitempty"`
+		Created           string   `json:"created_at,omitempty"`
+	}
+	var slim []s
+	for _, g := range resp.Response.NatGatewaySet {
+		var ips []string
+		for _, ip := range g.PublicIpAddressSet {
+			if ip != nil && ip.PublicIpAddress != nil {
+				ips = append(ips, *ip.PublicIpAddress)
+			}
+		}
+		slim = append(slim, s{
+			ID:                derefStringRaw(g.NatGatewayId),
+			Name:              derefStringRaw(g.NatGatewayName),
+			State:             derefStringRaw(g.State),
+			BandwidthOutMbps:  derefUint64Raw(g.InternetMaxBandwidthOut),
+			PublicIPs:         ips,
+			Created:           derefStringRaw(g.CreatedTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextVPN(ctx context.Context) (string, error) {
+	client, err := c.VPC()
+	if err != nil {
+		return "", err
+	}
+	req := vpc.NewDescribeVpnGatewaysRequest()
+	var offset, limit uint64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeVpnGateways(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.VpnGatewaySet) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID       string `json:"id"`
+		Name     string `json:"name,omitempty"`
+		Type     string `json:"type,omitempty"`
+		State    string `json:"state"`
+		PublicIP string `json:"public_ip,omitempty"`
+		VpcID    string `json:"vpc_id,omitempty"`
+	}
+	var slim []s
+	for _, g := range resp.Response.VpnGatewaySet {
+		slim = append(slim, s{
+			ID:       derefStringRaw(g.VpnGatewayId),
+			Name:     derefStringRaw(g.VpnGatewayName),
+			Type:     derefStringRaw(g.Type),
+			State:    derefStringRaw(g.State),
+			PublicIP: derefStringRaw(g.PublicIpAddress),
+			VpcID:    derefStringRaw(g.VpcId),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextCCN(ctx context.Context) (string, error) {
+	client, err := c.VPC()
+	if err != nil {
+		return "", err
+	}
+	req := vpc.NewDescribeCcnsRequest()
+	var offset, limit uint64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeCcns(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.CcnSet) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID            string `json:"id"`
+		Name          string `json:"name,omitempty"`
+		State         string `json:"state"`
+		InstanceCount uint64 `json:"instance_count,omitempty"`
+		Created       string `json:"created_at,omitempty"`
+	}
+	var slim []s
+	for _, ccn := range resp.Response.CcnSet {
+		slim = append(slim, s{
+			ID:            derefStringRaw(ccn.CcnId),
+			Name:          derefStringRaw(ccn.CcnName),
+			State:         derefStringRaw(ccn.State),
+			InstanceCount: derefUint64Raw(ccn.InstanceCount),
+			Created:       derefStringRaw(ccn.CreateTime),
+		})
+	}
+	b, err := json.Marshal(slim)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *Client) contextDC(ctx context.Context) (string, error) {
+	client, err := newDCClient(c, c.creds.Region)
+	if err != nil {
+		return "", err
+	}
+	req := dc.NewDescribeDirectConnectsRequest()
+	var offset, limit int64 = 0, 100
+	req.Offset = &offset
+	req.Limit = &limit
+	resp, err := client.DescribeDirectConnects(req)
+	if err != nil {
+		return "", friendlyError(err)
+	}
+	if resp == nil || resp.Response == nil || len(resp.Response.DirectConnectSet) == 0 {
+		return "", nil
+	}
+	type s struct {
+		ID           string `json:"id"`
+		Name         string `json:"name,omitempty"`
+		State        string `json:"state"`
+		AccessPoint  string `json:"access_point,omitempty"`
+	}
+	var slim []s
+	for _, d := range resp.Response.DirectConnectSet {
+		slim = append(slim, s{
+			ID:          derefStringRaw(d.DirectConnectId),
+			Name:        derefStringRaw(d.DirectConnectName),
+			State:       derefStringRaw(d.State),
+			AccessPoint: derefStringRaw(d.AccessPointId),
 		})
 	}
 	b, err := json.Marshal(slim)
