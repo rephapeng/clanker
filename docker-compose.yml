@@ -1,0 +1,63 @@
+# Clanker — local dev stack.
+#
+# Brings up two containers managed together:
+#   • clanker-api        Go API on :47180 (bearer-auth, Tencent + vLLM-backed)
+#   • clanker-dashboard  Vite preview of the React dashboard on :4173
+#
+# All secrets and runtime knobs live in .env (gitignored).
+#
+# Usage:
+#   docker compose up -d --build      # first time, or after API code changes
+#   docker compose up -d              # subsequent restarts
+#   docker compose logs -f clanker-api
+#   docker compose down               # stop and remove
+
+services:
+  clanker-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.sre
+    image: clanker:local
+    container_name: clanker-api
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "47180:47180"
+    command:
+      - server
+      - --host=0.0.0.0
+      - --port=47180
+      - --ai-profile=openai
+      - --openai-key=${VLLM_API_KEY}
+      - --openai-model=${VLLM_MODEL}
+      - --local-model-inference-url=${VLLM_BASE_URL}
+      - --no-thinking
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:47180/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  clanker-dashboard:
+    image: node:20-alpine
+    container_name: clanker-dashboard
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./dashboard:/app
+    ports:
+      - "4173:4173"
+    # Install deps if missing, build dist if missing, then serve.
+    # Re-running `up` is fast because both steps no-op when artifacts exist.
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        [ -d node_modules ] || npm ci --no-audit --no-fund
+        [ -d dist ] || npm run build
+        npm run preview
+    depends_on:
+      clanker-api:
+        condition: service_started
