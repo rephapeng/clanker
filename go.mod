@@ -31,12 +31,29 @@ require (
 	github.com/mark3labs/mcp-go v0.46.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/antiddos v1.3.89
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/billing v1.3.84
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam v1.3.42
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cbs v1.3.96
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdb v1.3.94
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn v1.3.90
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/clb v1.3.83
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cloudaudit v1.3.40
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cls v1.3.97
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.98
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.89
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cynosdb v1.3.98
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dc v1.3.96
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lighthouse v1.3.91
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/mongodb v1.3.93
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor v1.3.96
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/postgres v1.3.89
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/redis v1.3.79
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.94
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo v1.3.93
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tke v1.3.86
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.3.83
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/waf v1.3.95
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
 	golang.org/x/crypto v0.49.0
 	golang.org/x/oauth2 v0.36.0
@@ -115,22 +132,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/antiddos v1.3.89 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/billing v1.3.84 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cam v1.3.42 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cbs v1.3.96 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cdn v1.3.90 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/clb v1.3.83 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cloudaudit v1.3.40 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cls v1.3.97 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cynosdb v1.3.98 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dc v1.3.96 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/mongodb v1.3.93 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor v1.3.96 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/redis v1.3.79 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.94 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/teo v1.3.93 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/waf v1.3.95 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

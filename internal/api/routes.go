@@ -35,6 +35,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/tencent/scan/antiddos-coverage", s.handleTencentAntiDDoSCoverage)
 	s.mux.HandleFunc("GET /api/v1/tencent/scan/audit-coverage", s.handleTencentAuditCoverage)
 	s.mux.HandleFunc("GET /api/v1/tencent/metrics/cvm", s.handleTencentCVMMetrics)
+	s.mux.HandleFunc("GET /api/v1/tencent/metrics/lighthouse", s.handleTencentLighthouseMetrics)
 	s.mux.HandleFunc("GET /api/v1/tencent/cost/by-product", s.handleTencentCostByProduct)
 	s.mux.HandleFunc("GET /api/v1/tencent/cost/resources", s.handleTencentCostResources)
 
@@ -182,6 +183,8 @@ func gatherTencentByType(ctx context.Context, client *tencent.Client, resourceTy
 		return client.JSONCLSTopics(ctx)
 	case "cloudaudit", "audit", "tracks":
 		return client.JSONCloudAudit(ctx)
+	case "lighthouse", "lh":
+		return client.JSONLighthouses(ctx)
 	default:
 		return "", fmt.Errorf("unsupported resource type %q", resourceType)
 	}
@@ -431,6 +434,32 @@ func (s *Server) handleTencentCVMMetrics(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	body, err := client.CVMMetricsJSON(r.Context(), region, metric, minutes)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "tencent_api_error", err.Error())
+		return
+	}
+	writeRawData(w, body)
+}
+
+// handleTencentLighthouseMetrics mirrors handleTencentCVMMetrics but for the
+// Lighthouse product line (namespace QCE/LIGHTHOUSE). Default metric is
+// Cpu_Usage. Other valid names: Mem_Usage, Public_Bandwidth_In,
+// Public_Bandwidth_Out, Internal_Bandwidth_In, Internal_Bandwidth_Out.
+func (s *Server) handleTencentLighthouseMetrics(w http.ResponseWriter, r *http.Request) {
+	client, err := s.tencentClient(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "tencent_credentials", err.Error())
+		return
+	}
+	region := strings.TrimSpace(r.URL.Query().Get("region"))
+	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
+	minutes := 60
+	if v := strings.TrimSpace(r.URL.Query().Get("minutes")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			minutes = n
+		}
+	}
+	body, err := client.LighthouseMetricsJSON(r.Context(), region, metric, minutes)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "tencent_api_error", err.Error())
 		return

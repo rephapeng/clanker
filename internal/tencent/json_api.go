@@ -55,6 +55,10 @@ func (c *Client) JSONAlarmPolicies(ctx context.Context) (string, error)  { retur
 func (c *Client) JSONCLSTopics(ctx context.Context) (string, error)      { return c.contextCLSTopics(ctx) }
 func (c *Client) JSONCloudAudit(ctx context.Context) (string, error)     { return c.contextCloudAudit(ctx) }
 
+// Lighthouse (Tencent's lightweight cloud server, separate product from CVM).
+// JSONLighthouses is declared in internal/tencent/lighthouse.go directly so it
+// can sit next to LighthouseMetricsJSON; we keep this comment as the index entry.
+
 // JSONSGRules returns the ingress + egress policies of a single security
 // group plus a `risk` label on each ingress rule that exposes a sensitive
 // port to the public internet. Wraps DescribeSecurityGroupPolicies.
