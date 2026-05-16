@@ -39,6 +39,7 @@ func ExecuteTencentPlan(ctx context.Context, plan *Plan, opts ExecOptions) error
 	}
 
 	bindings := make(map[string]string)
+	priorOutputs := make([]string, 0, len(plan.Commands))
 
 	for idx, cmdSpec := range plan.Commands {
 		args := make([]string, 0, len(cmdSpec.Args))
@@ -49,7 +50,41 @@ func ExecuteTencentPlan(ctx context.Context, plan *Plan, opts ExecOptions) error
 			return fmt.Errorf("command %d rejected: %w", idx+1, err)
 		}
 		if hasUnresolvedPlaceholders(args) {
-			return fmt.Errorf("command %d has unresolved placeholders after substitutions", idx+1)
+			unresolved := extractUnresolvedPlaceholders(args)
+			declared := make([]string, 0, len(bindings))
+			for k := range bindings {
+				declared = append(declared, "<"+k+">")
+			}
+			return fmt.Errorf(
+				"command %d has unresolved placeholders after substitutions: %s. "+
+					"Bound so far: [%s]. Likely cause: the JSONPath in an earlier command's "+
+					"`produces` didn't match (object/array path used where a scalar/array was "+
+					"expected, or the field name is wrong). For per-instance Cloud Monitor "+
+					"queries this can't be chained — use a discovery-only plan and view the "+
+					"dashboard's Monitoring page",
+				idx+1,
+				strings.Join(unresolved, ", "),
+				strings.Join(declared, ", "),
+			)
+		}
+
+		// filter verb — runs client-side over a prior command's output.
+		// Does not touch Tencent. Output is appended to priorOutputs so a
+		// later filter can chain off it, and bindings get applied just like
+		// for Tencent commands so produces can extract from filtered items.
+		if strings.EqualFold(strings.TrimSpace(args[0]), "filter") {
+			_, _ = fmt.Fprintf(opts.Writer, "[maker] running %d/%d: filter source=%s path=%s field=%s op=%s value=%s\n",
+				idx+1, len(plan.Commands), args[1], args[2], args[3], args[4], args[5])
+			body, err := executeFilter(args, priorOutputs)
+			if err != nil {
+				return fmt.Errorf("command %d (filter) failed: %w", idx+1, err)
+			}
+			if strings.TrimSpace(body) != "" {
+				_, _ = fmt.Fprintln(opts.Writer, body)
+			}
+			priorOutputs = append(priorOutputs, body)
+			learnPlanBindingsFromProduces(cmdSpec.Produces, body, bindings)
+			continue
 		}
 
 		service := strings.ToLower(strings.TrimSpace(args[1]))
@@ -70,10 +105,12 @@ func ExecuteTencentPlan(ctx context.Context, plan *Plan, opts ExecOptions) error
 		if err != nil {
 			if isTencentSoftFailure(err) {
 				_, _ = fmt.Fprintf(opts.Writer, "[maker]   soft failure (treating as success): %v\n", err)
+				priorOutputs = append(priorOutputs, "")
 				continue
 			}
 			return fmt.Errorf("tencent command %d failed (%s.%s): %w", idx+1, service, action, err)
 		}
+		priorOutputs = append(priorOutputs, body)
 
 		if strings.TrimSpace(body) != "" {
 			_, _ = fmt.Fprintln(opts.Writer, body)
@@ -88,6 +125,17 @@ func ExecuteTencentPlan(ctx context.Context, plan *Plan, opts ExecOptions) error
 // call. Destructive actions (Terminate*, Delete*, Reset*) are gated behind
 // --destroyer to match the policy applied to every other provider.
 func validateTencentCommand(args []string, allowDestructive bool) error {
+	if len(args) == 0 {
+		return fmt.Errorf("empty command")
+	}
+	verb := strings.ToLower(strings.TrimSpace(args[0]))
+
+	// The filter verb is a client-side post-processor — it doesn't hit
+	// Tencent and has its own arg shape, so validate separately.
+	if verb == "filter" {
+		return validateFilterCommand(args)
+	}
+
 	if len(args) < 4 {
 		return fmt.Errorf("tencent plan commands require at least 4 args [verb, service, action, region], got %d", len(args))
 	}
@@ -95,9 +143,8 @@ func validateTencentCommand(args []string, allowDestructive bool) error {
 		return fmt.Errorf("tencent plan commands take at most 5 args [verb, service, action, region, params], got %d", len(args))
 	}
 
-	verb := strings.ToLower(strings.TrimSpace(args[0]))
 	if verb != "tencent-api" {
-		return fmt.Errorf("only tencent-api verb is supported (got %q)", args[0])
+		return fmt.Errorf("only tencent-api and filter verbs are supported (got %q)", args[0])
 	}
 
 	service := strings.ToLower(strings.TrimSpace(args[1]))

@@ -33,6 +33,26 @@ var serviceVersions = map[string]string{
 	"cls":      "2020-10-16",
 }
 
+// knownHallucinatedActions maps LLM-invented action names to the real Tencent
+// action they probably meant. Curated empirically from Qwen3 maker output —
+// keep this list short and high-confidence. The point is to fail FAST with a
+// useful message instead of paying a Tencent round-trip for a definite typo.
+//
+// Key is "service.action" lowercased. Value is a human-readable hint string.
+var knownHallucinatedActions = map[string]string{
+	"monitor.getproductmetricdata":   "Use GetMonitorData. Tencent's Monitor service has no GetProductMetricData action.",
+	"monitor.describemonitordata":    "Use GetMonitorData. Tencent's Monitor service has no DescribeMonitorData action.",
+	"monitor.getproductmetrics":      "Use GetMonitorData or DescribeBaseMetrics.",
+	"monitor.describemetricdata":     "Use GetMonitorData.",
+	"monitor.describealarmpolicies":  "Use DescribeAlarmPolicy (singular).",
+	"billing.describebillsummary":    "Use DescribeBillSummaryByProduct, DescribeBillSummaryByPayMode, or DescribeBillSummaryByRegion.",
+	"billing.describeresourcebills":  "Use DescribeBillResourceSummary or DescribeBillDetail.",
+	"cvm.describeinstancestate":      "Use DescribeInstancesStatus.",
+	"cvm.listinstances":              "Use DescribeInstances (Tencent's discovery actions are always Describe*, never List*).",
+	"vpc.listvpcs":                   "Use DescribeVpcs.",
+	"cls.describetopics":             "Use DescribeTopics — make sure your service is `cls`, not `log`.",
+}
+
 // SendRaw makes a generic Tencent API call. Used by maker plan execution and
 // any future agent path that wants to invoke an action by string name.
 //
@@ -43,6 +63,13 @@ func (c *Client) SendRaw(service, action, region, paramsJSON string) (string, er
 	service = strings.ToLower(strings.TrimSpace(service))
 	action = strings.TrimSpace(action)
 	region = strings.TrimSpace(region)
+
+	// Fail fast on known-invented action names with a "did you mean" hint.
+	// Tencent's own error is the generic "InvalidAction" which doesn't help
+	// the user (or the LLM, on a retry) understand what to fix.
+	if hint, bad := knownHallucinatedActions[service+"."+strings.ToLower(action)]; bad {
+		return "", fmt.Errorf("action %q is not a real Tencent %s API action — %s", action, service, hint)
+	}
 
 	version, ok := serviceVersions[service]
 	if !ok {
