@@ -339,6 +339,17 @@ export function getCVMMetrics(region: string, metric = "CPUUsage", minutes = 60)
   );
 }
 
+// Lighthouse shares the same wire shape as CVM metrics (instance_id, name,
+// latest, min/avg/max, samples) — only the metric-name vocabulary differs.
+// QCE/LIGHTHOUSE valid metrics: CpuUsage, MemUsage, DiskUsage, CpuLoad1/5/15,
+// LighthouseInpkg / LighthouseOutpkg / LighthouseIntraffic / LighthouseOuttraffic.
+export function getLighthouseMetrics(region: string, metric = "CpuUsage", minutes = 60) {
+  const q = `?region=${encodeURIComponent(region)}&metric=${encodeURIComponent(metric)}&minutes=${minutes}`;
+  return call<{ region: string; metric: string; window_minutes: number; items: CVMMetricItem[] }>(
+    `/api/v1/tencent/metrics/lighthouse${q}`,
+  );
+}
+
 export type ProductCost = {
   code: string;
   name: string;

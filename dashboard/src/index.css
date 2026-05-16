@@ -1,3 +1,38 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    font-feature-settings: "cv11", "ss01";
+  }
+  body {
+    font-family: theme("fontFamily.sans");
+  }
+  *:focus {
+    outline: none;
+  }
+  *:focus-visible {
+    box-shadow: theme("boxShadow.focus");
+    border-radius: 4px;
+  }
+  ::selection {
+    background-color: theme("colors.brand.100");
+    color: theme("colors.brand.800");
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: theme("colors.line-strong");
+    border-radius: 8px;
+    border: 2px solid theme("colors.canvas");
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: theme("colors.ink.faint");
+  }
+}
