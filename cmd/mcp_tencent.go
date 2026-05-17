@@ -468,27 +468,71 @@ func registerTencentMCPTools(server *mcptransport.MCPServer) {
 	)
 
 	// clanker_tencent_maker_apply ──────────────────────────────────────────
+	//
+	// This is the ONLY write tool in the Tencent surface. Every other
+	// clanker_tencent_* tool is read-only (and marked as such via
+	// WithReadOnlyHintAnnotation). The policy here:
+	//
+	//   1. Tool annotation declares the operation destructive — MCP-aware
+	//      clients (Claude Code, Cursor, ...) surface this as a "needs
+	//      confirmation" prompt natively.
+	//   2. Description spells out the human-approval requirement in plain
+	//      language so it lands in the LLM's tool catalog prompt.
+	//   3. The schema REQUIRES human_approved=true. Calls without it are
+	//      refused server-side with an explanatory error — the LLM cannot
+	//      route around the policy without explicitly asserting the user
+	//      gave consent in the current conversation.
+	//   4. destroyer=true is still required for Terminate/Delete/Reset/
+	//      Release/Discontinue on top of human_approved=true, gated by
+	//      the existing validator in internal/maker/validate_tencent.go.
 	server.AddTool(
 		mcp.NewTool(
 			"clanker_tencent_maker_apply",
-			mcp.WithDescription("Execute a Maker plan against Tencent. Pass the "+
-				"entire plan object from clanker_tencent_maker_plan. Set "+
-				"destroyer=true ONLY when the user explicitly confirmed a "+
-				"destructive action; otherwise Terminate/Delete/Reset/Release/"+
-				"Discontinue commands are rejected at validation time."),
+			mcp.WithDescription("Execute a Maker plan against Tencent (provisioning, "+
+				"modification, OR destruction). REQUIRES HUMAN APPROVAL — this is a "+
+				"WRITE operation that mutates real cloud resources. POLICY: you MUST "+
+				"NOT call this tool unless the human user has, in the current chat "+
+				"conversation, explicitly and unambiguously approved the SPECIFIC "+
+				"plan that you are about to apply. If the user has not yet seen or "+
+				"approved the plan, you MUST first present the plan content to them "+
+				"(commands, destructive_count) and wait for an explicit \"yes\" / "+
+				"\"go ahead\" / \"apply it\" / equivalent. Saying the words \"I will "+
+				"apply\" is NOT approval — the user must say it. Once approved, call "+
+				"this tool with human_approved=true. Set destroyer=true ADDITIONALLY "+
+				"only when the user has explicitly approved a destructive "+
+				"(Terminate/Delete/Reset/Release/Discontinue) command in the plan."),
 			mcp.WithObject("plan",
 				mcp.Required(),
 				mcp.Description("Full plan object returned by clanker_tencent_maker_plan"),
 			),
+			mcp.WithBoolean("human_approved",
+				mcp.Required(),
+				mcp.Description("MUST be true. The human user has, in the current conversation, explicitly approved this specific plan. Calls with false or missing are rejected. The agent is responsible for obtaining this approval before calling — do not invent it."),
+			),
 			mcp.WithBoolean("destroyer",
 				mcp.DefaultBool(false),
-				mcp.Description("Required for any Terminate/Delete/Reset/Release/Discontinue. Set true only when the user explicitly confirmed destructive intent."),
+				mcp.Description("Set true ADDITIONALLY when the user has explicitly approved a destructive command (Terminate/Delete/Reset/Release/Discontinue). Without this flag those commands are rejected by the plan validator."),
 			),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(false),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			plan := rawObjectParam(req, "plan")
 			if plan == nil {
 				return mcp.NewToolResultError("plan is required (full plan object from clanker_tencent_maker_plan)"), nil
+			}
+			// Server-side backstop: refuse without explicit human approval.
+			// The agent's prompt instructs it not to lie, but in case it
+			// does, this is the last gate before the call hits Tencent.
+			humanApproved := boolParam(req, "human_approved", false)
+			if !humanApproved {
+				return mcp.NewToolResultError(
+					"refused: human_approved must be true. POLICY: clanker_tencent_maker_apply " +
+						"only executes when the human owner has explicitly approved this specific " +
+						"plan in the current conversation. Present the plan to the user (commands, " +
+						"destructive_count, summary), wait for explicit approval, then retry with " +
+						"human_approved=true.",
+				), nil
 			}
 			destroyer := boolParam(req, "destroyer", false)
 			body, err := json.Marshal(map[string]any{

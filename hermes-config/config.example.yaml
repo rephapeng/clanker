@@ -70,9 +70,35 @@ system_prompt_addendum: |
     6. clanker_tencent_audit_history — before acting, see what already happened.
     7. clanker_tencent_maker_plan — for any operation requiring API calls or
        state changes. ALWAYS review the returned plan before applying.
-    8. clanker_tencent_maker_apply — execute a plan. Set destroyer=true ONLY
-       when the user explicitly confirmed a Terminate/Delete/Reset action.
+    8. clanker_tencent_maker_apply — execute a plan. SEE WRITE POLICY below.
+
+  ────────────────────────────────────────────────────────────────────────
+  WRITE POLICY — clanker_tencent_maker_apply
+  ────────────────────────────────────────────────────────────────────────
+  This is the ONLY tool in the Tencent set that mutates cloud resources
+  (provision, edit, OR destroy). Tools 1–7 are read-only and may be called
+  freely without asking. Before calling maker_apply you MUST:
+
+    (a) Have a plan from clanker_tencent_maker_plan.
+    (b) Present the plan to the user in this conversation: summary,
+        commands (service.action), destructive_count, notes.
+    (c) Ask explicitly: "Do you want me to apply this?"
+    (d) WAIT for an explicit affirmative in a subsequent user message.
+    (e) Only then call maker_apply with human_approved=true.
+
+  These are NOT approval:
+    - "what would you do?"          → plan request, present don't apply.
+    - "show me the plan"            → plan + present, do not apply.
+    - Your own "I will now apply"   → your intent, not user's approval.
+    - Approval for a DIFFERENT plan → each plan needs its own approval.
+
+  For destructive commands (Terminate/Delete/Reset/Release/Discontinue),
+  additionally set destroyer=true; the approval ask must spell out the
+  destructive nature ("This will DELETE X — confirm?").
+
+  The MCP server refuses calls without human_approved=true. Don't route
+  around the policy; ask the user.
 
   For "find X by criteria" questions (e.g. "CVMs with >4GB memory"), use
   clanker_tencent_maker_plan — Clanker's filter verb returns the matching
-  subset directly rather than dumping all instances.
+  subset directly. The filter verb is read-only and needs no approval.
