@@ -1,15 +1,21 @@
-# Clanker — local dev stack.
+# Clanker + Hermes Agent — local & server stack.
 #
-# Brings up two containers managed together:
-#   • clanker-api        Go API on :47180 (bearer-auth, Tencent + vLLM-backed)
+# Services (all on the internal `clanker_default` network):
+#   • clanker-api        Go HTTP API on :47180 (bearer-auth, Tencent + vLLM-backed)
 #   • clanker-dashboard  Vite preview of the React dashboard on :4173
+#   • clanker-mcp        MCP server on :39393 — translates clanker-api into
+#                        Model Context Protocol tools for Hermes / Claude
+#                        Code / Cursor to consume.
+#   • hermes-agent       Nous Research's Hermes Agent (https://github.com/nousresearch/hermes-agent).
+#                        Reads ~/.hermes/config.yaml (mounted from ./hermes-config)
+#                        which points its MCP client at clanker-mcp.
 #
-# All secrets and runtime knobs live in .env (gitignored).
+# Secrets and runtime knobs all live in .env (gitignored).
 #
 # Usage:
-#   docker compose up -d --build      # first time, or after API code changes
+#   docker compose up -d --build      # first time / after Go code changes
 #   docker compose up -d              # subsequent restarts
-#   docker compose logs -f clanker-api
+#   docker compose logs -f clanker-mcp hermes-agent
 #   docker compose down               # stop and remove
 
 services:
@@ -61,3 +67,78 @@ services:
     depends_on:
       clanker-api:
         condition: service_started
+
+  # MCP server: same clanker:local image, different command. Translates
+  # tool calls from Hermes/Claude Code/Cursor into HTTP requests against
+  # clanker-api over the internal network. NOT published externally —
+  # only Hermes (and other MCP clients on the same docker network) reach it.
+  clanker-mcp:
+    image: clanker:local
+    container_name: clanker-mcp
+    restart: unless-stopped
+    environment:
+      CLANKER_API_URL: http://clanker-api:47180
+      CLANKER_API_TOKEN: ${CLANKER_API_TOKEN}
+    expose:
+      - "39393"
+    command:
+      - mcp
+      - --transport=http
+      - --listen=0.0.0.0:39393
+    depends_on:
+      clanker-api:
+        condition: service_healthy
+
+  # Nous Research's Hermes Agent. Built from the upstream repo on first
+  # `compose up`. The repo is cloned into ./vendor/hermes-agent by
+  # `make setup-hermes` (or scripts/setup-hermes.sh) — that location is
+  # also what `internal/hermes/runner.go` looks for, so the same checkout
+  # serves both the legacy subprocess bridge and this server mode.
+  #
+  # First boot: ensure `make setup-hermes` ran so ./vendor/hermes-agent
+  # exists, then create ./hermes-config/config.yaml from
+  # ./hermes-config/config.example.yaml and fill in your model keys.
+  hermes-agent:
+    # Opt-in via profile so `docker compose up -d` works before you've
+    # cloned hermes-agent. Bring it up with:
+    #   git clone https://github.com/NousResearch/hermes-agent.git vendor/hermes-agent
+    #   docker compose --profile hermes up -d --build hermes-agent
+    # Dashboard then available at http://localhost:9119
+    profiles: ["hermes"]
+    build:
+      context: ./vendor/hermes-agent
+      dockerfile: Dockerfile
+    image: hermes-agent:local
+    container_name: hermes-agent
+    restart: unless-stopped
+    environment:
+      # vLLM (OpenAI-compatible) — Hermes uses these because config.yaml
+      # leaves model.api_key blank and the upstream falls back to env.
+      OPENAI_API_KEY:  ${VLLM_API_KEY}
+      OPENAI_BASE_URL: ${VLLM_BASE_URL}
+      # Browser dashboard. The entrypoint backgrounds `hermes dashboard`
+      # before exec'ing the main command. HOST=0.0.0.0 auto-enables
+      # --insecure (required when not on localhost).
+      HERMES_DASHBOARD:      "1"
+      HERMES_DASHBOARD_HOST: 0.0.0.0
+      HERMES_DASHBOARD_PORT: "9119"
+      # Hermes stores skills/memory/config under HERMES_HOME.
+      HERMES_HOME: /opt/data
+    volumes:
+      # Persistent state (skills, memory, conversation history).
+      - hermes-data:/opt/data
+      # Single-file mount: overlays config.yaml on top of the named volume
+      # so HERMES_HOME stays as a writable dir but config is read-only.
+      - ./hermes-config/config.yaml:/opt/data/config.yaml:ro
+    ports:
+      - "9119:9119"  # Hermes browser dashboard
+    # Keep the container alive after the dashboard backgrounds. The
+    # default `hermes` entrypoint would drop into TUI mode which has no
+    # TTY here — sleep infinity is the standard headless pattern.
+    command: ["sleep", "infinity"]
+    depends_on:
+      clanker-mcp:
+        condition: service_started
+
+volumes:
+  hermes-data:

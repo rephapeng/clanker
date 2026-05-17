@@ -1,0 +1,78 @@
+# Hermes Agent config — copy this file to `config.yaml` in the same dir,
+# then run `docker compose up -d hermes-agent`.
+#
+# The config schema is Hermes Agent's, not Clanker's. See
+# https://github.com/NousResearch/hermes-agent for the full reference.
+#
+# What this file declares:
+#   1. Which LLM model Hermes uses for reasoning.
+#   2. The clanker-mcp server as an MCP tool source — gives Hermes access
+#      to all eight Tencent tools (list, scan, metrics, cost, topology,
+#      audit-history, maker-plan, maker-apply).
+
+# ── LLM provider ────────────────────────────────────────────────────────────
+# OpenRouter is the default — easiest path because tool-calling works out of
+# the box. Any model name from https://openrouter.ai/models works. Set
+# OPENROUTER_API_KEY in .env.
+model:
+  provider: openrouter
+  name: anthropic/claude-opus-4
+  # base_url and api_key fall back to OPENROUTER_API_KEY env when omitted.
+
+# ── Alternative: vLLM / OpenAI-compatible custom endpoint ───────────────────
+# To use vLLM (or any OpenAI-compatible server), swap the model section with:
+#
+#   model:
+#     provider: custom
+#     model: <your-model-name>
+#     base_url: https://<your-vllm-host>/v1
+#     # api_key falls back to OPENAI_API_KEY env (set from VLLM_API_KEY in
+#     # docker-compose.yml — keeps the secret out of this file).
+#
+# IMPORTANT: vLLM must be started with --enable-auto-tool-choice AND a
+# --tool-call-parser that matches your model's output format. For Qwen3 with
+# XML-style tool calls, the stock 'hermes' parser does NOT work — use a
+# parser like 'qwen3_xml_tool_parser', 'hermes_xml', or 'pythonic' depending
+# on your vLLM version. Probe the endpoint directly with a curl that includes
+# tools+tool_choice=auto; if tool_calls comes back as [] and content contains
+# raw <tool_call>...</tool_call> XML, your parser flag is wrong.
+
+# ── MCP servers ─────────────────────────────────────────────────────────────
+# Hermes connects to each listed MCP server on startup and merges their
+# tools into its registry. The `clanker` entry below points at our
+# clanker-mcp service over the docker network — Hermes can then call
+# clanker_tencent_list / clanker_tencent_scan / etc. like native tools.
+mcp_servers:
+  clanker:
+    # Streamable HTTP transport — matches `clanker mcp --transport=http`.
+    url: http://clanker-mcp:39393/mcp
+    # No auth header needed: clanker-mcp itself is unauthenticated on the
+    # internal docker network. clanker-mcp injects the bearer token into
+    # its calls to clanker-api on our behalf (via CLANKER_API_TOKEN env).
+    description: >
+      Tencent Cloud operations via Clanker. Provides read-only inventory,
+      security scans, monitoring, billing, and the Maker plan/apply engine
+      for infrastructure changes.
+
+# ── Conversation style ──────────────────────────────────────────────────────
+# Suggest Hermes prefer Clanker's read-only tools first when answering
+# Tencent-related questions, only escalating to maker_apply when the user
+# has clearly authorised a change.
+system_prompt_addendum: |
+  When the user asks about Tencent Cloud infrastructure, prefer the
+  clanker_tencent_* tools in this order:
+
+    1. clanker_tencent_list — for static specs (CPU, memory, state, IP, zone).
+    2. clanker_tencent_topology — for "where does X live?" questions.
+    3. clanker_tencent_scan — for security audits.
+    4. clanker_tencent_metrics — ONLY for runtime values (usage %, traffic).
+    5. clanker_tencent_cost — for billing summaries (use a closed YYYY-MM).
+    6. clanker_tencent_audit_history — before acting, see what already happened.
+    7. clanker_tencent_maker_plan — for any operation requiring API calls or
+       state changes. ALWAYS review the returned plan before applying.
+    8. clanker_tencent_maker_apply — execute a plan. Set destroyer=true ONLY
+       when the user explicitly confirmed a Terminate/Delete/Reset action.
+
+  For "find X by criteria" questions (e.g. "CVMs with >4GB memory"), use
+  clanker_tencent_maker_plan — Clanker's filter verb returns the matching
+  subset directly rather than dumping all instances.

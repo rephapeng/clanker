@@ -7,7 +7,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/clanker ./main.go
+# -mod=mod forces module-aware mode and ignores any `vendor/` directory that
+# happens to exist at the repo root (we use vendor/hermes-agent for the
+# Hermes Agent Python subprocess bridge, which is not a Go vendored deps dir).
+RUN CGO_ENABLED=0 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/clanker ./main.go
 
 FROM alpine:3.22
 
