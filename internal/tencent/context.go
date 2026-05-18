@@ -244,15 +244,16 @@ func (c *Client) contextCVMs(ctx context.Context) (string, error) {
 	}
 
 	type instSummary struct {
-		ID        string   `json:"id"`
-		Name      string   `json:"name"`
-		State     string   `json:"state"`
-		Type      string   `json:"type"`
-		Zone      string   `json:"zone"`
-		PrivateIP []string `json:"private_ip,omitempty"`
-		PublicIP  []string `json:"public_ip,omitempty"`
-		CreatedAt string   `json:"created_at,omitempty"`
-		OSName    string   `json:"os,omitempty"`
+		ID        string            `json:"id"`
+		Name      string            `json:"name"`
+		State     string            `json:"state"`
+		Type      string            `json:"type"`
+		Zone      string            `json:"zone"`
+		PrivateIP []string          `json:"private_ip,omitempty"`
+		PublicIP  []string          `json:"public_ip,omitempty"`
+		CreatedAt string            `json:"created_at,omitempty"`
+		OSName    string            `json:"os,omitempty"`
+		Tags      map[string]string `json:"tags,omitempty"`
 	}
 	var slim []instSummary
 	for _, in := range resp.Response.InstanceSet {
@@ -266,6 +267,7 @@ func (c *Client) contextCVMs(ctx context.Context) (string, error) {
 			PublicIP:  stringSlice(in.PublicIpAddresses),
 			CreatedAt: derefStringRaw(in.CreatedTime),
 			OSName:    derefStringRaw(in.OsName),
+			Tags:      extractTags(in.Tags),
 		})
 	}
 	b, err := json.Marshal(slim)
@@ -289,11 +291,12 @@ func (c *Client) contextVPCs(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	type vpcSummary struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		CIDR      string `json:"cidr"`
-		IsDefault bool   `json:"is_default"`
-		CreatedAt string `json:"created_at,omitempty"`
+		ID        string            `json:"id"`
+		Name      string            `json:"name"`
+		CIDR      string            `json:"cidr"`
+		IsDefault bool              `json:"is_default"`
+		CreatedAt string            `json:"created_at,omitempty"`
+		Tags      map[string]string `json:"tags,omitempty"`
 	}
 	var slim []vpcSummary
 	for _, v := range resp.Response.VpcSet {
@@ -303,6 +306,7 @@ func (c *Client) contextVPCs(ctx context.Context) (string, error) {
 			CIDR:      derefStringRaw(v.CidrBlock),
 			IsDefault: derefBool(v.IsDefault),
 			CreatedAt: derefStringRaw(v.CreatedTime),
+			Tags:      extractTags(v.TagSet),
 		})
 	}
 	b, err := json.Marshal(slim)
@@ -364,16 +368,17 @@ func (c *Client) contextMySQL(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	type mysqlSummary struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Status      string `json:"status"`
-		Engine      string `json:"engine"`
-		MemoryMB    int64  `json:"memory_mb,omitempty"`
-		VolumeGB    int64  `json:"volume_gb,omitempty"`
-		Zone        string `json:"zone,omitempty"`
-		PrivateIP   string `json:"private_ip,omitempty"`
-		PrivatePort int64  `json:"private_port,omitempty"`
-		PublicAddr  string `json:"public_addr,omitempty"`
+		ID          string            `json:"id"`
+		Name        string            `json:"name"`
+		Status      string            `json:"status"`
+		Engine      string            `json:"engine"`
+		MemoryMB    int64             `json:"memory_mb,omitempty"`
+		VolumeGB    int64             `json:"volume_gb,omitempty"`
+		Zone        string            `json:"zone,omitempty"`
+		PrivateIP   string            `json:"private_ip,omitempty"`
+		PrivatePort int64             `json:"private_port,omitempty"`
+		PublicAddr  string            `json:"public_addr,omitempty"`
+		Tags        map[string]string `json:"tags,omitempty"`
 	}
 	var slim []mysqlSummary
 	for _, i := range resp.Response.Items {
@@ -387,6 +392,8 @@ func (c *Client) contextMySQL(ctx context.Context) (string, error) {
 			Zone:        derefStringRaw(i.Zone),
 			PrivateIP:   derefStringRaw(i.Vip),
 			PrivatePort: derefInt64Raw(i.Vport),
+			// MySQL tags are not on DescribeDBInstances — they require a
+			// separate DescribeTagsOfInstanceIds call. Left as a TODO.
 		}
 		if i.WanStatus != nil && *i.WanStatus == 1 {
 			s.PublicAddr = fmt.Sprintf("%s:%d", derefStringRaw(i.WanDomain), derefInt64Raw(i.WanPort))
@@ -417,15 +424,16 @@ func (c *Client) contextPostgres(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	type pgSummary struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Status    string `json:"status"`
-		Engine    string `json:"engine"`
-		CPU       uint64 `json:"cpu,omitempty"`
-		MemoryGB  uint64 `json:"memory_gb,omitempty"`
-		StorageGB uint64 `json:"storage_gb,omitempty"`
-		Zone      string `json:"zone,omitempty"`
-		CreatedAt string `json:"created_at,omitempty"`
+		ID        string            `json:"id"`
+		Name      string            `json:"name"`
+		Status    string            `json:"status"`
+		Engine    string            `json:"engine"`
+		CPU       uint64            `json:"cpu,omitempty"`
+		MemoryGB  uint64            `json:"memory_gb,omitempty"`
+		StorageGB uint64            `json:"storage_gb,omitempty"`
+		Zone      string            `json:"zone,omitempty"`
+		CreatedAt string            `json:"created_at,omitempty"`
+		Tags      map[string]string `json:"tags,omitempty"`
 	}
 	var slim []pgSummary
 	for _, i := range resp.Response.DBInstanceSet {
@@ -439,6 +447,7 @@ func (c *Client) contextPostgres(ctx context.Context) (string, error) {
 			StorageGB: derefUint64Raw(i.DBInstanceStorage),
 			Zone:      derefStringRaw(i.Zone),
 			CreatedAt: derefStringRaw(i.CreateTime),
+			Tags:      extractTags(i.TagList),
 		})
 	}
 	b, err := json.Marshal(slim)

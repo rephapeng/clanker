@@ -745,11 +745,13 @@ function ResourcesView() {
   const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
   const [err, setErr] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [groupByTag, setGroupByTag] = useState<string>(""); // "" = no grouping
 
   async function fetchRows() {
     setLoading(true);
     setErr("");
     setRows(null);
+    setGroupByTag(""); // reset grouping when fetching new type
     const r = await getResources(type, region);
     setLoading(false);
     if (!r.ok) {
@@ -758,6 +760,23 @@ function ResourcesView() {
     }
     setRows(r.data ?? []);
   }
+
+  // Collect distinct tag keys present on at least one row — used to populate
+  // the Group-by-tag dropdown. Resources without a `tags` field contribute
+  // nothing.
+  const tagKeys = useMemo(() => {
+    if (!rows) return [];
+    const keys = new Set<string>();
+    for (const r of rows) {
+      const tags = r.tags;
+      if (tags && typeof tags === "object" && !Array.isArray(tags)) {
+        for (const k of Object.keys(tags as Record<string, unknown>)) {
+          keys.add(k);
+        }
+      }
+    }
+    return Array.from(keys).sort();
+  }, [rows]);
 
   return (
     <section>
@@ -777,6 +796,16 @@ function ResourcesView() {
         <Field label="Region">
           <RegionSelectInline />
         </Field>
+        {tagKeys.length > 0 && (
+          <Field label="Group by tag">
+            <Select value={groupByTag} onChange={setGroupByTag}>
+              <option value="">(no grouping)</option>
+              {tagKeys.map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <div className="ml-auto">
           <Button onClick={() => void fetchRows()} disabled={loading}>
             {loading ? "Fetching…" : "Fetch"}
@@ -793,10 +822,64 @@ function ResourcesView() {
           <div className="mb-3">
             <CountPill count={rows.length} label={`${type} record${rows.length === 1 ? "" : "s"}`} />
           </div>
-          <DynamicTable rows={rows} />
+          {groupByTag ? (
+            <GroupedDynamicTables rows={rows} groupKey={groupByTag} />
+          ) : (
+            <DynamicTable rows={rows} />
+          )}
         </>
       )}
     </section>
+  );
+}
+
+// GroupedDynamicTables renders one DynamicTable per distinct value of the
+// chosen tag key, plus an "(untagged)" bucket for rows missing it. Each
+// group has a header showing the value + row count.
+function GroupedDynamicTables({
+  rows,
+  groupKey,
+}: {
+  rows: Record<string, unknown>[];
+  groupKey: string;
+}) {
+  const groups = useMemo(() => {
+    const m = new Map<string, Record<string, unknown>[]>();
+    for (const r of rows) {
+      const tags = r.tags as Record<string, unknown> | undefined;
+      const v =
+        tags && typeof tags === "object" && !Array.isArray(tags)
+          ? (tags[groupKey] as string | undefined) ?? ""
+          : "";
+      const bucket = v && String(v).trim() !== "" ? String(v) : "(untagged)";
+      const arr = m.get(bucket) ?? [];
+      arr.push(r);
+      m.set(bucket, arr);
+    }
+    // sort: untagged last, otherwise alphabetical
+    return Array.from(m.entries()).sort(([a], [b]) => {
+      if (a === "(untagged)") return 1;
+      if (b === "(untagged)") return -1;
+      return a.localeCompare(b);
+    });
+  }, [rows, groupKey]);
+
+  return (
+    <div className="space-y-5">
+      {groups.map(([value, groupRows]) => (
+        <div key={value}>
+          <div className="flex items-baseline gap-2 mb-2">
+            <span className="text-sm font-semibold text-ink">
+              {groupKey}=<span className="text-brand-700">{value}</span>
+            </span>
+            <span className="text-xs text-ink-muted">
+              ({groupRows.length} record{groupRows.length === 1 ? "" : "s"})
+            </span>
+          </div>
+          <DynamicTable rows={groupRows} />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -2879,8 +2962,8 @@ function DynamicTable({ rows }: { rows: Record<string, unknown>[] }) {
         {rows.map((row, i) => (
           <Tr key={i}>
             {cols.map((c) => (
-              <Td key={c} mono={MONO_HINT_KEYS.test(c)}>
-                {formatCell(row[c])}
+              <Td key={c} mono={c !== "tags" && MONO_HINT_KEYS.test(c)}>
+                {renderCell(c, row[c])}
               </Td>
             ))}
           </Tr>
@@ -2888,6 +2971,33 @@ function DynamicTable({ rows }: { rows: Record<string, unknown>[] }) {
       </Tbody>
     </TableWrap>
   );
+}
+
+// renderCell decides between rich rendering (tags → chips, lists → joined,
+// objects → JSON pretty-string) and plain text. Tags get a dedicated chip
+// view so users can scan them visually instead of parsing JSON.
+function renderCell(col: string, v: unknown): React.ReactNode {
+  if (v == null) return "-";
+  if (col === "tags" && v && typeof v === "object" && !Array.isArray(v)) {
+    const entries = Object.entries(v as Record<string, unknown>);
+    if (entries.length === 0) return <span className="text-ink-faint">—</span>;
+    return (
+      <div className="flex flex-wrap gap-1">
+        {entries.map(([k, val]) => (
+          <span
+            key={k}
+            className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-brand-100 bg-brand-50 text-brand-700"
+            title={`${k}=${String(val)}`}
+          >
+            <span className="font-medium">{k}</span>
+            <span className="text-brand-700/70">=</span>
+            <span className="font-mono">{String(val)}</span>
+          </span>
+        ))}
+      </div>
+    );
+  }
+  return formatCell(v);
 }
 
 function formatCell(v: unknown): string {

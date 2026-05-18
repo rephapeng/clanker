@@ -27,16 +27,17 @@ func (c *Client) Lighthouse() (*lighthouse.Client, error) {
 // lighthouseInstance is the slim wire shape returned by JSONLighthouses
 // and used as the source list for LighthouseMetricsJSON.
 type lighthouseInstance struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	State      string   `json:"state"`
-	BundleID   string   `json:"bundle_id,omitempty"`
-	BlueprintID string  `json:"blueprint_id,omitempty"`
-	Zone       string   `json:"zone,omitempty"`
-	PrivateIP  []string `json:"private_ip,omitempty"`
-	PublicIP   []string `json:"public_ip,omitempty"`
-	OSName     string   `json:"os,omitempty"`
-	CreatedAt  string   `json:"created_at,omitempty"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	State       string            `json:"state"`
+	BundleID    string            `json:"bundle_id,omitempty"`
+	BlueprintID string            `json:"blueprint_id,omitempty"`
+	Zone        string            `json:"zone,omitempty"`
+	PrivateIP   []string          `json:"private_ip,omitempty"`
+	PublicIP    []string          `json:"public_ip,omitempty"`
+	OSName      string            `json:"os,omitempty"`
+	CreatedAt   string            `json:"created_at,omitempty"`
+	Tags        map[string]string `json:"tags,omitempty"`
 }
 
 // contextLighthouses lists Lighthouse instances in the active region.
@@ -68,6 +69,7 @@ func (c *Client) contextLighthouses(ctx context.Context) (string, error) {
 			PublicIP:    stringSlice(in.PublicAddresses),
 			OSName:      derefStringRaw(in.OsName),
 			CreatedAt:   derefStringRaw(in.CreatedTime),
+			Tags:        extractTags(in.Tags),
 		}
 		out = append(out, row)
 	}
