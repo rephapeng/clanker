@@ -22,6 +22,7 @@ import {
   getCostByProduct,
   ResourceCost,
   ProductCost,
+  CostSummary,
   getAuditCoverage,
   CVMMetricItem,
   AuditCoverageResult,
@@ -2040,7 +2041,7 @@ function CostExplorerView() {
   const defaultMonth =
     now.getUTCFullYear() + "-" + String(now.getUTCMonth() + 1).padStart(2, "0");
   const [month, setMonth] = useState(defaultMonth);
-  const [products, setProducts] = useState<{ total: number; items: ProductCost[] } | null>(null);
+  const [products, setProducts] = useState<{ total: number; summary?: CostSummary; items: ProductCost[] } | null>(null);
   const [resources, setResources] = useState<ResourceCost[] | null>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -2054,7 +2055,7 @@ function CostExplorerView() {
     ]);
     setLoading(false);
     if (!p.ok) { setErr(`${p.code}: ${p.message}`); return; }
-    setProducts({ total: p.data.total, items: p.data.items ?? [] });
+    setProducts({ total: p.data.total, summary: p.data.summary, items: p.data.items ?? [] });
     if (rsr.ok) setResources(rsr.data.items ?? []);
   }
 
@@ -2087,15 +2088,53 @@ function CostExplorerView() {
         </Field>
         {products && (
           <div className="ml-auto flex items-baseline gap-2">
-            <span className="text-xs text-ink-subtle uppercase tracking-wider">Total</span>
+            <span className="text-xs text-ink-subtle uppercase tracking-wider">
+              {products.summary ? "Cash paid (incl. tax)" : "Total"}
+            </span>
             <span className="font-mono text-2xl font-semibold text-brand-600">
-              {products.total.toFixed(2)}
+              {(products.summary?.cash_incl_tax ?? products.total).toFixed(2)}
             </span>
           </div>
         )}
       </Toolbar>
 
       {err && <ErrorBox message={err} />}
+
+      {products?.summary &&
+        (products.summary.consumption > 0 || products.summary.cash_incl_tax > 0) && (
+        <Card className="mb-6 max-w-md">
+          <SectionLabel>Billing waterfall — {month}</SectionLabel>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-ink-muted">Consumption (RealCost)</span>
+              <span className="font-mono tabular-nums">{products.summary.consumption.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-ink-subtle">
+              <span>&minus; Voucher</span>
+              <span className="font-mono tabular-nums">{products.summary.voucher.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-t border-line pt-1">
+              <span className="text-ink-muted">= Cash before tax</span>
+              <span className="font-mono tabular-nums">{products.summary.cash_before_tax.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-ink-subtle">
+              <span>+ Tax</span>
+              <span className="font-mono tabular-nums">{products.summary.tax.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-t border-line pt-1 font-semibold">
+              <span>= Cash paid (incl. tax)</span>
+              <span className="font-mono tabular-nums text-brand-600">{products.summary.cash_incl_tax.toFixed(2)}</span>
+            </div>
+          </div>
+          {products.summary.note && (
+            <div className="mt-2 text-xs text-warn">{products.summary.note}</div>
+          )}
+          <div className="mt-2 text-[11px] text-ink-subtle">
+            Consumption is total spend (vouchers + cash). Cash paid is what
+            actually left your account — matches the Tencent console headline.
+          </div>
+        </Card>
+      )}
 
       {products && products.items.length === 0 && (
         <Empty message={`No billing data for ${month}. Check that the month has closed or pick an earlier month.`} />

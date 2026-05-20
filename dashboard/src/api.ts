@@ -360,9 +360,18 @@ export type ProductCost = {
   ratio?: string;
 };
 
+export type CostSummary = {
+  consumption: number;      // total RealCost (voucher + cash + tax)
+  voucher: number;          // amount covered by vouchers
+  cash_before_tax: number;  // cash portion, pre-tax
+  tax: number;              // tax amount
+  cash_incl_tax: number;    // cash_before_tax + tax — the console headline
+  note?: string;            // set when the fee breakdown call failed
+};
+
 export function getCostByProduct(month: string) {
   const q = month ? `?month=${encodeURIComponent(month)}` : "";
-  return call<{ month: string; total: number; items: ProductCost[] }>(
+  return call<{ month: string; total: number; summary?: CostSummary; items: ProductCost[] }>(
     `/api/v1/tencent/cost/by-product${q}`,
   );
 }
