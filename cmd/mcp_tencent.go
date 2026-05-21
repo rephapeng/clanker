@@ -191,7 +191,7 @@ func rawObjectParam(req mcp.CallToolRequest, key string) map[string]any {
 	return obj
 }
 
-// registerTencentMCPTools adds the eight Tencent tools onto the shared MCP
+// registerTencentMCPTools adds the nine Tencent tools onto the shared MCP
 // server built in newClankerMCPServer(). Called from there so all tools
 // (Vercel, Fly, Railway, Verda, Tencent) live on one MCP endpoint.
 //
@@ -375,6 +375,47 @@ func registerTencentMCPTools(server *mcptransport.MCPServer) {
 			}
 			merged := fmt.Sprintf(`{"by_product":%s,"top_resources":%s}`, byProd, byRes)
 			return mcp.NewToolResultText(merged), nil
+		},
+	)
+
+	// clanker_tencent_vouchers ─────────────────────────────────────────────
+	server.AddTool(
+		mcp.NewTool(
+			"clanker_tencent_vouchers",
+			mcp.WithDescription("Tencent Cloud vouchers (account credits). With no "+
+				"voucher_id: returns the voucher inventory plus an `owners` array "+
+				"breaking voucher spending down per owner account UIN (spent = "+
+				"nominal − remaining balance). Optionally filter by status — pass "+
+				"status=unUsed for ACTIVE (still-usable) vouchers only. With a "+
+				"voucher_id: returns that voucher's deduction history instead "+
+				"(when/how much/which products). Amounts are in account currency."),
+			mcp.WithString("status",
+				mcp.Description("Filter the inventory by voucher status: unUsed (active), used, delivered, cancel, overdue. Omit for all. Ignored when voucher_id is set."),
+				mcp.Enum("unUsed", "used", "delivered", "cancel", "overdue"),
+			),
+			mcp.WithString("voucher_id",
+				mcp.Description("If set, return this voucher's usage/deduction history instead of the inventory."),
+			),
+			mcp.WithReadOnlyHintAnnotation(true),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			voucherID := strParam(req, "voucher_id")
+			if voucherID != "" {
+				body, err := api.get(ctx, "/api/v1/tencent/cost/voucher-usage/"+url.PathEscape(voucherID), nil)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				return mcp.NewToolResultText(body), nil
+			}
+			q := url.Values{}
+			if status := strParam(req, "status"); status != "" {
+				q.Set("status", status)
+			}
+			body, err := api.get(ctx, "/api/v1/tencent/cost/vouchers", q)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(body), nil
 		},
 	)
 

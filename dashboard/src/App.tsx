@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useMemo, useState } from "react";
 import {
   ApiResult,
   ApplyResult,
@@ -23,6 +23,12 @@ import {
   ResourceCost,
   ProductCost,
   CostSummary,
+  getVouchers,
+  getVoucherUsage,
+  Voucher,
+  VoucherOwner,
+  VouchersResult,
+  VoucherUsageResult,
   getAuditCoverage,
   CVMMetricItem,
   AuditCoverageResult,
@@ -2191,7 +2197,236 @@ function CostExplorerView() {
           </TableWrap>
         </div>
       )}
+
+      <div className="mt-8">
+        <VouchersPanel />
+      </div>
     </section>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Vouchers panel — account credits + per-owner spend breakdown.
+// Rendered inside Cost Explorer. Vouchers are not month-scoped, so this
+// fetches independently of the month picker above.
+// ───────────────────────────────────────────────────────────────────────────
+
+type UsageState = VoucherUsageResult | "loading" | { error: string };
+
+function VouchersPanel() {
+  const [data, setData] = useState<VouchersResult | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [usage, setUsage] = useState<Record<string, UsageState>>({});
+
+  async function run() {
+    setLoading(true);
+    setErr("");
+    setData(null);
+    setExpanded(null);
+    setUsage({});
+    const r = await getVouchers(status);
+    setLoading(false);
+    if (!r.ok) {
+      setErr(`${r.code}: ${r.message}`);
+      return;
+    }
+    setData(r.data);
+  }
+
+  useEffect(() => {
+    void run(); /* eslint-disable-next-line */
+  }, [status]);
+
+  async function toggle(id: string) {
+    if (expanded === id) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(id);
+    const existing = usage[id];
+    const needsFetch =
+      existing === undefined ||
+      (typeof existing === "object" && "error" in existing);
+    if (needsFetch) {
+      setUsage((u) => ({ ...u, [id]: "loading" }));
+      const r = await getVoucherUsage(id);
+      setUsage((u) => ({
+        ...u,
+        [id]: r.ok ? r.data : { error: `${r.code}: ${r.message}` },
+      }));
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <SectionLabel>Vouchers &amp; credits</SectionLabel>
+        <div className="flex items-center gap-2">
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="bg-surface border border-line rounded px-2 py-1 text-xs text-ink hover:border-line-strong focus:border-brand-500 transition"
+          >
+            <option value="">All statuses</option>
+            <option value="unUsed">Active (unUsed)</option>
+            <option value="used">Used</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancel">Cancelled</option>
+            <option value="overdue">Overdue</option>
+          </select>
+          <Button onClick={() => void run()} disabled={loading}>
+            {loading ? "Loading…" : "Refresh"}
+          </Button>
+        </div>
+      </div>
+
+      {err && <ErrorBox message={err} />}
+
+      {data && data.count === 0 && (
+        <Empty message="No vouchers found for this account / status filter." />
+      )}
+
+      {data && data.count > 0 && (
+        <>
+          <Card className="mb-4">
+            <div className="flex flex-wrap gap-x-10 gap-y-2 text-sm">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-ink-subtle">Vouchers</div>
+                <div className="font-mono tabular-nums text-ink">{data.count}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-ink-subtle">Nominal value</div>
+                <div className="font-mono tabular-nums text-ink">{data.total_nominal.toFixed(2)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-ink-subtle">Remaining balance</div>
+                <div className="font-mono tabular-nums text-brand-600">{data.total_balance.toFixed(2)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-ink-subtle">Spent</div>
+                <div className="font-mono tabular-nums text-ink">{data.total_spent.toFixed(2)}</div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="mb-4">
+            <SectionLabel>Voucher spending by owner account</SectionLabel>
+            <TableWrap>
+              <Thead>
+                <tr>
+                  <Th>Owner account UIN</Th>
+                  <Th className="text-right">Vouchers</Th>
+                  <Th className="text-right">Active</Th>
+                  <Th className="text-right">Nominal</Th>
+                  <Th className="text-right">Balance</Th>
+                  <Th className="text-right">Spent</Th>
+                </tr>
+              </Thead>
+              <Tbody>
+                {data.owners.map((o: VoucherOwner) => (
+                  <Tr key={o.owner_uin || "(none)"}>
+                    <Td mono>{o.owner_uin || "-"}</Td>
+                    <Td mono className="text-right">{o.voucher_count}</Td>
+                    <Td mono className="text-right">{o.active_count}</Td>
+                    <Td mono className="text-right">{o.nominal.toFixed(2)}</Td>
+                    <Td mono className="text-right">{o.balance.toFixed(2)}</Td>
+                    <Td mono className="text-right">{o.spent.toFixed(2)}</Td>
+                  </Tr>
+                ))}
+              </Tbody>
+            </TableWrap>
+          </Card>
+
+          <SectionLabel>Vouchers — click a row for usage history</SectionLabel>
+          <TableWrap>
+            <Thead>
+              <tr>
+                <Th>Voucher ID</Th>
+                <Th>Owner UIN</Th>
+                <Th>Status</Th>
+                <Th className="text-right">Nominal</Th>
+                <Th className="text-right">Balance</Th>
+                <Th className="text-right">Spent</Th>
+                <Th>Expires</Th>
+              </tr>
+            </Thead>
+            <Tbody>
+              {data.vouchers.map((v: Voucher) => {
+                const u = usage[v.voucher_id];
+                return (
+                  <Fragment key={v.voucher_id}>
+                    <tr
+                      onClick={() => void toggle(v.voucher_id)}
+                      className="hover:bg-surface-2 transition cursor-pointer"
+                    >
+                      <Td mono>{v.voucher_id || "-"}</Td>
+                      <Td mono>{v.owner_uin || "-"}</Td>
+                      <Td>
+                        <span className={v.active ? "text-brand-600" : "text-ink-subtle"}>
+                          {v.status || "-"}
+                        </span>
+                      </Td>
+                      <Td mono className="text-right">{v.nominal.toFixed(2)}</Td>
+                      <Td mono className="text-right">{v.balance.toFixed(2)}</Td>
+                      <Td mono className="text-right">{v.spent.toFixed(2)}</Td>
+                      <Td>{v.end_time || "-"}</Td>
+                    </tr>
+                    {expanded === v.voucher_id && (
+                      <tr className="bg-surface-2">
+                        <td colSpan={7} className="px-3 py-2.5">
+                          {u === "loading" && (
+                            <div className="text-sm text-ink-subtle">Loading usage…</div>
+                          )}
+                          {u && typeof u === "object" && "error" in u && (
+                            <div className="text-sm text-bad">{u.error}</div>
+                          )}
+                          {u && typeof u === "object" && "records" in u && (
+                            u.records.length === 0 ? (
+                              <div className="text-sm text-ink-subtle">
+                                No usage records — this voucher has not been spent.
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="text-[11px] uppercase tracking-wider text-ink-subtle mb-1.5">
+                                  Usage history — total used {u.total_used.toFixed(2)}
+                                </div>
+                                <table className="w-full border-collapse">
+                                  <thead>
+                                    <tr className="text-left">
+                                      <Th>Used at</Th>
+                                      <Th className="text-right">Amount</Th>
+                                      <Th>Pay mode</Th>
+                                      <Th>Products</Th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-line">
+                                    {u.records.map((rec, i) => (
+                                      <tr key={i}>
+                                        <Td mono>{rec.used_time || "-"}</Td>
+                                        <Td mono className="text-right">{rec.used_amount.toFixed(2)}</Td>
+                                        <Td>{rec.pay_mode || "-"}</Td>
+                                        <Td>{rec.products || "-"}</Td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </Tbody>
+          </TableWrap>
+        </>
+      )}
+    </div>
   );
 }
 

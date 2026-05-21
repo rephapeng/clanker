@@ -394,3 +394,71 @@ export function getCostResources(month: string, top = 50) {
     `/api/v1/tencent/cost/resources${q}`,
   );
 }
+
+// Vouchers (account credits). `spent` is derived as nominal − balance.
+// `owners` groups the inventory by the voucher owner's account UIN — the
+// per-account voucher-spend breakdown.
+export type Voucher = {
+  voucher_id: string;
+  owner_uin: string;
+  status: string;
+  active: boolean;       // true when still usable (status "unUsed")
+  nominal: number;
+  balance: number;
+  spent: number;
+  pay_mode?: string;
+  pay_scene?: string;
+  begin_time?: string;
+  end_time?: string;
+  products?: string;
+  remark?: string;
+};
+
+export type VoucherOwner = {
+  owner_uin: string;
+  voucher_count: number;
+  active_count: number;
+  nominal: number;
+  balance: number;
+  spent: number;
+};
+
+export type VouchersResult = {
+  status?: string;
+  count: number;
+  total_nominal: number;
+  total_balance: number;
+  total_spent: number;
+  owners: VoucherOwner[];
+  vouchers: Voucher[];
+};
+
+// status filters by Tencent's voucher-status enum: unUsed (active), used,
+// delivered, cancel, overdue. Empty string returns all.
+export function getVouchers(status = "") {
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  return call<VouchersResult>(`/api/v1/tencent/cost/vouchers${q}`);
+}
+
+export type VoucherUsageRecord = {
+  voucher_id: string;
+  used_amount: number;
+  used_time: string;
+  pay_mode?: string;
+  pay_scene?: string;
+  products?: string;
+  seq_id?: string;
+};
+
+export type VoucherUsageResult = {
+  voucher_id: string;
+  count: number;
+  total_used: number;
+  records: VoucherUsageRecord[];
+};
+
+export function getVoucherUsage(voucherId: string) {
+  return call<VoucherUsageResult>(
+    `/api/v1/tencent/cost/voucher-usage/${encodeURIComponent(voucherId)}`,
+  );
+}
