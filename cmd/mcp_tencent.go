@@ -382,16 +382,23 @@ func registerTencentMCPTools(server *mcptransport.MCPServer) {
 	server.AddTool(
 		mcp.NewTool(
 			"clanker_tencent_vouchers",
-			mcp.WithDescription("Tencent Cloud vouchers (account credits). With no "+
-				"voucher_id: returns the voucher inventory plus an `owners` array "+
-				"breaking voucher spending down per owner account UIN (spent = "+
-				"nominal − remaining balance). Optionally filter by status — pass "+
-				"status=unUsed for ACTIVE (still-usable) vouchers only. With a "+
-				"voucher_id: returns that voucher's deduction history instead "+
-				"(when/how much/which products). Amounts are in account currency."),
+			mcp.WithDescription("Tencent Cloud vouchers (account credits). Three modes, "+
+				"checked in this order:\n"+
+				"  • voucher_id set → that voucher's deduction history "+
+				"(when/how much/which products).\n"+
+				"  • month set (YYYY-MM) → that month's voucher DEDUCTION grouped by "+
+				"the owner account UIN of each billed resource (the only "+
+				"month-scoped, per-account view of voucher spend).\n"+
+				"  • neither → voucher inventory plus an `owners` array breaking "+
+				"voucher spend down per owner account UIN (spent = nominal − "+
+				"remaining balance); pass status=unUsed for ACTIVE vouchers only.\n"+
+				"Amounts are in account currency."),
 			mcp.WithString("status",
-				mcp.Description("Filter the inventory by voucher status: unUsed (active), used, delivered, cancel, overdue. Omit for all. Ignored when voucher_id is set."),
+				mcp.Description("Filter the inventory by voucher status: unUsed (active), used, delivered, cancel, overdue. Omit for all. Ignored when voucher_id or month is set."),
 				mcp.Enum("unUsed", "used", "delivered", "cancel", "overdue"),
+			),
+			mcp.WithString("month",
+				mcp.Description("YYYY-MM, e.g. 2026-04. If set, return that month's voucher deduction grouped by owner account UIN. Ignored when voucher_id is set."),
 			),
 			mcp.WithString("voucher_id",
 				mcp.Description("If set, return this voucher's usage/deduction history instead of the inventory."),
@@ -402,6 +409,14 @@ func registerTencentMCPTools(server *mcptransport.MCPServer) {
 			voucherID := strParam(req, "voucher_id")
 			if voucherID != "" {
 				body, err := api.get(ctx, "/api/v1/tencent/cost/voucher-usage/"+url.PathEscape(voucherID), nil)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				return mcp.NewToolResultText(body), nil
+			}
+			if month := strParam(req, "month"); month != "" {
+				body, err := api.get(ctx, "/api/v1/tencent/cost/voucher-by-owner",
+					url.Values{"month": {month}})
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
