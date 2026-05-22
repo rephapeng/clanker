@@ -158,7 +158,17 @@ func newClankerMCPServer() *mcptransport.MCPServer {
 		mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args commandArgs) (*mcp.CallToolResult, error) {
 			result, err := runClankerCommand(ctx, args)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				// runClankerCommand captures stdout+stderr in result["output"]
+				// via CombinedOutput. Surface it — otherwise the caller only
+				// sees a bare "clanker command failed: exit status 1" and the
+				// actual error is swallowed.
+				msg := err.Error()
+				if result != nil {
+					if out, _ := result["output"].(string); strings.TrimSpace(out) != "" {
+						msg += "\n\n--- command output (stdout+stderr) ---\n" + out
+					}
+				}
+				return mcp.NewToolResultError(msg), nil
 			}
 			return mcp.NewToolResultJSON(result)
 		}),
