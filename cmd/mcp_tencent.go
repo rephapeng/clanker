@@ -339,6 +339,49 @@ func registerTencentMCPTools(server *mcptransport.MCPServer) {
 		},
 	)
 
+	// clanker_tencent_expiry ───────────────────────────────────────────────
+	server.AddTool(
+		mcp.NewTool(
+			"clanker_tencent_expiry",
+			mcp.WithDescription("Tencent Cloud renewal alert. Walks every PREPAID-capable "+
+				"resource (CVM, Lighthouse, CBS, MySQL, Postgres, Redis, MongoDB, CynosDB, "+
+				"CLB, AntiDDoS — and SSL with include_ssl=true) across the requested regions "+
+				"and returns items at or below the renewal threshold. Use this BEFORE asking "+
+				"the user about renewals — the structured response includes counts.expired / "+
+				"counts.flagged / counts.auto_renew so you can phrase a precise summary."),
+			mcp.WithString("regions",
+				mcp.Description("Comma-separated regions to scan (e.g. ap-singapore,ap-jakarta). Defaults to the server's configured region."),
+			),
+			mcp.WithNumber("threshold",
+				mcp.DefaultNumber(30),
+				mcp.Description("Flag items this many days from expiry or closer (default 30)"),
+			),
+			mcp.WithBoolean("manual_only",
+				mcp.DefaultBool(true),
+				mcp.Description("Only list items with auto_renew=false; auto-renewing ones are still counted in counts.auto_renew (default true)"),
+			),
+			mcp.WithBoolean("include_ssl",
+				mcp.DefaultBool(false),
+				mcp.Description("Include SSL certificate validity as additional items (different signal from subscription expiry; default false)"),
+			),
+			mcp.WithReadOnlyHintAnnotation(true),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			q := url.Values{}
+			if v := strParam(req, "regions"); v != "" {
+				q.Set("regions", v)
+			}
+			q.Set("threshold", strconv.Itoa(intParam(req, "threshold", 30)))
+			q.Set("manual_only", strconv.FormatBool(boolParam(req, "manual_only", true)))
+			q.Set("include_ssl", strconv.FormatBool(boolParam(req, "include_ssl", false)))
+			body, err := api.get(ctx, "/api/v1/tencent/expiry", q)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(body), nil
+		},
+	)
+
 	// clanker_tencent_cost ─────────────────────────────────────────────────
 	server.AddTool(
 		mcp.NewTool(
