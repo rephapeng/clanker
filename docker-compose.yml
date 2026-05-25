@@ -89,6 +89,43 @@ services:
       clanker-api:
         condition: service_healthy
 
+  # Daily renewal sweep — runs `clanker tencent expiry` on a fixed loop and
+  # writes the result to stdout. The compose log retains the output, so the
+  # check itself is "did the cron find anything?" — visible via:
+  #
+  #   docker compose logs clanker-cron
+  #   docker compose logs --tail 50 -f clanker-cron
+  #
+  # Defaults below match the two regions this account actually uses and a
+  # 14-day window (renewal-window emails from Tencent typically arrive 15
+  # days out, so we beat that). Override via .env if your account scopes
+  # differ: EXPIRY_REGIONS, EXPIRY_THRESHOLD, EXPIRY_INTERVAL_SEC.
+  clanker-cron:
+    image: clanker:local
+    container_name: clanker-cron
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      EXPIRY_REGIONS:      "${EXPIRY_REGIONS:-ap-singapore,ap-jakarta}"
+      EXPIRY_THRESHOLD:    "${EXPIRY_THRESHOLD:-14}"
+      EXPIRY_INTERVAL_SEC: "${EXPIRY_INTERVAL_SEC:-86400}"
+    # Override the image's `clanker` entrypoint so the supervisor loop runs
+    # the binary repeatedly instead of `clanker sh -c ...` (which the parser
+    # rejects as an unknown subcommand).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # `|| true` so a non-zero exit (which means "items flagged" — the
+        # whole reason this thing exists) doesn't kill the supervisor loop.
+        while true; do
+          printf '\n[clanker-cron] === %s ===\n' "$$(date -Iseconds)"
+          clanker tencent expiry --regions="$$EXPIRY_REGIONS" --threshold="$$EXPIRY_THRESHOLD" || true
+          sleep "$$EXPIRY_INTERVAL_SEC"
+        done
+    depends_on:
+      clanker-api:
+        condition: service_healthy
+
   # Nous Research's Hermes Agent. Built from the upstream repo on first
   # `compose up`. The repo is cloned into ./vendor/hermes-agent by
   # `make setup-hermes` (or scripts/setup-hermes.sh) — that location is
