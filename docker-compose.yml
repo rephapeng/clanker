@@ -76,11 +76,20 @@ services:
     image: clanker:local
     container_name: clanker-mcp
     restart: unless-stopped
+    # Same .env as clanker-api so the `clanker_run_command` MCP tool — which
+    # exec's the local clanker binary inside THIS container — has Tencent
+    # credentials (TENCENT_SECRET_ID/KEY etc.). HTTP-backed tools don't need
+    # these, but the subprocess CLI path does.
+    env_file: .env
     environment:
       CLANKER_API_URL: http://clanker-api:47180
       CLANKER_API_TOKEN: ${CLANKER_API_TOKEN}
     expose:
       - "39393"
+    # Loopback publish so host-side Hermes (moved out of the docker network)
+    # can reach the MCP endpoint at http://127.0.0.1:39393.
+    ports:
+      - "127.0.0.1:39393:39393"
     command:
       - mcp
       - --transport=http
@@ -162,11 +171,16 @@ services:
       # Hermes stores skills/memory/config under HERMES_HOME.
       HERMES_HOME: /opt/data
     volumes:
-      # Persistent state (skills, memory, conversation history).
+      # Persistent state (skills, memory, conversation history). Backed by
+      # the EXTERNAL volume clanker_hermes_data — see the volumes: block
+      # below. Deleting/recreating this container does NOT lose data.
       - hermes-data:/opt/data
-      # Single-file mount: overlays config.yaml on top of the named volume
-      # so HERMES_HOME stays as a writable dir but config is read-only.
-      - ./hermes-config/config.yaml:/opt/data/config.yaml:ro
+      # Single-file mount: overlays config.yaml on top of the named volume.
+      # READ-WRITE (no :ro) so the Hermes agent can edit its own config —
+      # e.g. register new mcp_servers at runtime. Because this is a bind
+      # mount, in-container writes to /opt/data/config.yaml are persisted
+      # straight back to ./hermes-config/config.yaml on the host.
+      - ./hermes-config/config.yaml:/opt/data/config.yaml
     ports:
       - "9119:9119"  # Hermes browser dashboard
     # Keep the container alive after the dashboard backgrounds. The
@@ -178,4 +192,18 @@ services:
         condition: service_started
 
 volumes:
+  # EXTERNAL + pre-created out of band:  docker volume create clanker_hermes_data
+  #
+  # `external: true` means Compose treats this volume as owned by the
+  # operator, not the project — it is NEVER created or destroyed by
+  # compose. The Hermes data therefore survives every teardown path:
+  #   • docker rm -f hermes-agent          (container delete)
+  #   • docker compose rm / down           (project teardown)
+  #   • docker compose down -v             (compose skips external volumes)
+  # The same volume re-attaches on the next `up`, so skills / memory /
+  # conversation history carry over. To start fresh you must explicitly
+  # `docker volume rm clanker_hermes_data`. Back up by archiving
+  # /var/lib/docker/volumes/clanker_hermes_data/_data.
   hermes-data:
+    external: true
+    name: clanker_hermes_data
