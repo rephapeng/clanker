@@ -191,7 +191,7 @@ func rawObjectParam(req mcp.CallToolRequest, key string) map[string]any {
 	return obj
 }
 
-// registerTencentMCPTools adds the nine Tencent tools onto the shared MCP
+// registerTencentMCPTools adds the ten Tencent tools onto the shared MCP
 // server built in newClankerMCPServer(). Called from there so all tools
 // (Vercel, Fly, Railway, Verda, Tencent) live on one MCP endpoint.
 //

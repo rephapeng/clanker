@@ -192,6 +192,64 @@ infra:
 #   org_slug: ""             # Optional org slug filter (or set FLY_ORG / FLY_ORG_SLUG).
 #                            # Empty = see resources across every org the token can access.
 
+# Sentry.io (for `clanker sentry ask ...` and `clanker sentry list issues`):
+# sentry:
+#   auth_token: ""           # Sentry User Auth Token (or set SENTRY_AUTH_TOKEN)
+#                            # Generate at https://sentry.io/settings/account/api/auth-tokens/
+#                            # Recommended scopes: org:read, project:read, project:write,
+#                            #                     event:read, event:admin, alerts:read, alerts:write
+#                            # project:write covers release management and alert rule mutations.
+#   org_slug: ""             # Sentry org slug (or set SENTRY_ORG)
+#   default_project: ""      # Optional default project slug for events/releases/alerts
+#                            # (or set SENTRY_PROJECT)
+#   host: "sentry.io"        # Override for self-hosted Sentry (or set SENTRY_HOST)
+#                            # Single-tenant EU customers use "<org>.sentry.io"
+
+# Linear (for `clanker linear ask ...` and `clanker linear list issues`):
+# linear:
+#   api_key: ""            # Linear Personal API Key (or set LINEAR_API_KEY)
+#                          # Generate at https://linear.app/settings/account/api
+#                          # IMPORTANT: the Authorization header is the raw key —
+#                          # do NOT add a "Bearer " prefix (Linear's #1 footgun).
+#   workspace_id: ""       # Workspace UUID (or set LINEAR_WORKSPACE_ID)
+#                          # Optional — only needed to scope conversation history;
+#                          # the API key already implies a single workspace.
+#   default_team: ""       # Default team key e.g. "ENG" (or set LINEAR_TEAM)
+#                          # Used by `clanker linear ask` to scope cycles + filters.
+#
+# Infra-resource annotation convention:
+#   Tag Linear issues that reference a cloud resource with a label of the
+#   form `infra:<type>:<id>` (e.g. `infra:lambda:arn:aws:lambda:us-east-1:123:foo`).
+#   The desktop app's resource drawer queries `/api/linear/issues/by-label/...`
+#   to surface linked work on a resource — without the label there's nothing
+#   to link. Create via `clanker linear label create infra:lambda:arn:... <team-id>`.
+#
+# Conversation history: ~/.clanker/linear-{workspaceID}.json (or {team} when
+# workspace_id is empty). Delete to start fresh.
+
+# Notion (for `clanker notion ask ...` and `clanker notion search ...`):
+# notion:
+#   integration_token: ""    # Internal Integration token (or set NOTION_API_KEY)
+#                            # Create at https://www.notion.so/profile/integrations
+#                            # IMPORTANT: tokens start with ZERO access. You must
+#                            # explicitly share each page/database with the
+#                            # integration via "..." → "Connections" in Notion.
+#                            # This is Notion's #1 UX papercut — surface it when
+#                            # search returns empty.
+#                            # Auth header IS "Authorization: Bearer <token>"
+#                            # (opposite of Linear — Notion does use the prefix).
+#   default_database_id: ""  # Optional default database UUID (or set NOTION_DATABASE_ID)
+#                            # Used by `clanker notion db row create --db <id>`
+#                            # so you don't have to retype the id every time.
+#
+# Conversation history: ~/.clanker/notion-{workspaceName}.json. The workspace
+# name comes from `GET /v1/users/me` → `bot.workspace_name`. Delete to start
+# fresh.
+#
+# Rate limit: Notion enforces ~3 req/sec average per integration — tighter
+# than Linear's. The client backs off exponentially on 429 with the
+# Retry-After header, so heavy parallel ask flows degrade gracefully.
+
 # Verda Cloud (for `clanker verda ...` and `clanker ask --verda ...`):
 # verda:
 #   client_id: ""            # Verda OAuth2 client ID (or set VERDA_CLIENT_ID, or run `verda auth login`)

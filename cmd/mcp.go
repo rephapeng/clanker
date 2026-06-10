@@ -371,6 +371,9 @@ func newClankerMCPServer() *mcptransport.MCPServer {
 	// tool blocks don't bloat this file further.
 	registerTencentMCPTools(server)
 
+	registerSentryMCPTools(server)
+	registerLinearMCPTools(server)
+	registerNotionMCPTools(server)
 	registerK8sMCPTools(server)
 
 	return server

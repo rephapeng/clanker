@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bgdnvk/clanker/internal/secfile"
 )
 
 // fileLocks serializes Save+Load per ScopeID so two concurrent
@@ -113,7 +115,7 @@ func (h *ConversationHistory) GetRecentContext(maxEntries int) string {
 func (h *ConversationHistory) Save() error {
 	h.mu.RLock()
 	data, err := json.MarshalIndent(h, "", "  ")
-	scopeName := sanitize(h.ScopeID)
+	scopeName := secfile.SafeSlug(h.ScopeID)
 	h.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("marshal history: %w", err)
@@ -127,11 +129,13 @@ func (h *ConversationHistory) Save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := secfile.EnsurePrivateDir(dir); err != nil {
 		return fmt.Errorf("create conversation dir: %w", err)
 	}
 
 	path := filepath.Join(dir, fmt.Sprintf("verda_%s.json", scopeName))
+	// os.CreateTemp creates files at 0o600 on Unix by default — Rename
+	// below preserves that, so the persisted file ends up private.
 	tmp, err := os.CreateTemp(dir, "verda_*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("create tmp: %w", err)
@@ -159,7 +163,7 @@ func (h *ConversationHistory) Load() error {
 	// is currently mid-rename on. Grabbing the struct mutex early would let
 	// a parallel Save hold fileLock + block here, so the order is:
 	// fileLock (cross-process write barrier) → struct mu (in-memory state).
-	scopeName := sanitize(h.ScopeID)
+	scopeName := secfile.SafeSlug(h.ScopeID)
 	lock := fileLockFor(scopeName)
 	lock.Lock()
 	defer lock.Unlock()
@@ -172,7 +176,7 @@ func (h *ConversationHistory) Load() error {
 		return err
 	}
 	path := filepath.Join(dir, fmt.Sprintf("verda_%s.json", scopeName))
-	data, err := os.ReadFile(path)
+	data, err := secfile.ReadPrivate(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -201,14 +205,6 @@ func conversationDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".clanker", "conversations"), nil
-}
-
-func sanitize(s string) string {
-	r := strings.NewReplacer(
-		"/", "_", "\\", "_", ":", "_", "*", "_",
-		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_", " ", "_",
-	)
-	return r.Replace(s)
 }
 
 func truncate(s string, max int) string {

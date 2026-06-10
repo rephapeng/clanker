@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bgdnvk/clanker/internal/secfile"
 )
 
 // ConversationEntry represents a single Q&A exchange.
@@ -93,7 +95,7 @@ func (h *ConversationHistory) Save() error {
 		return err
 	}
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := secfile.EnsurePrivateDir(dir); err != nil {
 		return fmt.Errorf("failed to create conversation directory: %w", err)
 	}
 
@@ -114,7 +116,7 @@ func (h *ConversationHistory) Save() error {
 
 	// Atomic write: write to temp file first, then rename.
 	tmp := filename + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	if err := secfile.WritePrivate(tmp, data); err != nil {
 		return fmt.Errorf("failed to write temp conversation file: %w", err)
 	}
 	if err := os.Rename(tmp, filename); err != nil {
@@ -135,7 +137,7 @@ func (h *ConversationHistory) Load() error {
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
+	data, err := secfile.ReadPrivate(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // No history yet — that is fine.
@@ -165,7 +167,7 @@ func (h *ConversationHistory) filePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, fmt.Sprintf("vercel_%s.json", sanitizeID(h.TeamID))), nil
+	return filepath.Join(dir, fmt.Sprintf("vercel_%s.json", secfile.SafeSlug(h.TeamID))), nil
 }
 
 // conversationDir returns ~/.clanker/conversations.
@@ -175,23 +177,6 @@ func conversationDir() (string, error) {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
 	return filepath.Join(home, ".clanker", "conversations"), nil
-}
-
-// sanitizeID replaces characters that are invalid in filenames.
-func sanitizeID(s string) string {
-	replacer := strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		":", "_",
-		"*", "_",
-		"?", "_",
-		"\"", "_",
-		"<", "_",
-		">", "_",
-		"|", "_",
-		" ", "_",
-	)
-	return replacer.Replace(s)
 }
 
 // truncateAnswer truncates text to maxLen characters, adding ellipsis if truncated.

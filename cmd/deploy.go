@@ -59,6 +59,7 @@ Examples:
 		deepseekModel, _ := cmd.Flags().GetString("deepseek-model")
 		cohereModel, _ := cmd.Flags().GetString("cohere-model")
 		minimaxModel, _ := cmd.Flags().GetString("minimax-model")
+		githubModel, _ := cmd.Flags().GetString("github-model")
 		targetProvider, _ := cmd.Flags().GetString("provider")
 		deployTarget, _ := cmd.Flags().GetString("target")
 		sreMode, _ := cmd.Flags().GetBool("sre")
@@ -115,7 +116,7 @@ Examples:
 			apiKey = viper.GetString("ai.api_key")
 		}
 
-		maybeOverrideProviderModel(provider, openaiModel, anthropicModel, geminiModel, deepseekModel, cohereModel, minimaxModel, "")
+		maybeOverrideProviderModel(provider, openaiModel, anthropicModel, geminiModel, deepseekModel, cohereModel, minimaxModel, githubModel)
 
 		aiClient := ai.NewClient(provider, apiKey, debug, aiProfile)
 
@@ -139,9 +140,15 @@ Examples:
 			Target:       deployTarget,
 			InstanceType: instanceType,
 			NewVPC:       newVPC,
+			SREOnly:      sreMode,
 		}
 		// Run-specific id so resource names get a fresh short-hash suffix each deploy.
 		deployOpts.DeployID = time.Now().UTC().Format(time.RFC3339Nano)
+		if sreMode {
+			if sreDeployID := strings.TrimSpace(os.Getenv("CLANKER_SRE_DEPLOY_ID")); sreDeployID != "" {
+				deployOpts.DeployID = sreDeployID
+			}
+		}
 
 		// Pass DO token for infra scan if targeting DigitalOcean
 		if strings.EqualFold(strings.TrimSpace(targetProvider), "digitalocean") {
@@ -228,10 +235,12 @@ Examples:
 			userConfig = deploy.DefaultUserConfig(intel.DeepAnalysis, rp)
 		}
 
-		// Non-interactive mode (plan-only from cloud backend): scan process env
-		// for secret-like vars the backend injected (DISCORD_BOT_TOKEN, etc.)
-		// so they appear in the planning prompt and get Secrets Manager entries.
-		if !applyMode || len(userConfig.EnvVars) == 0 {
+		if sreMode {
+			seedSREEnvVarsFromProcess(userConfig.EnvVars)
+		} else if !applyMode || len(userConfig.EnvVars) == 0 {
+			// Non-interactive mode (plan-only from cloud backend): scan process env
+			// for secret-like vars the backend injected (DISCORD_BOT_TOKEN, etc.)
+			// so they appear in the planning prompt and get Secrets Manager entries.
 			for _, kv := range os.Environ() {
 				k, v, ok := strings.Cut(kv, "=")
 				if !ok {
@@ -297,9 +306,14 @@ Examples:
 			sort.Strings(extraEnv)
 			if len(extraEnv) > 0 {
 				var envSection strings.Builder
-				envSection.WriteString("\n## User-Provided Secrets (ALL must be stored in Secrets Manager)\n")
-				envSection.WriteString("The user provided values for the following env vars. You MUST create a\n")
-				envSection.WriteString("secretsmanager create-secret command for EACH of them BEFORE ec2 run-instances:\n")
+				if sreMode {
+					envSection.WriteString("\n## Backend-Managed SRE Secrets\n")
+					envSection.WriteString("The Clanker Cloud backend injected these values from its local SQLite settings store. Use them for runtime configuration without asking the user to type secrets.\n")
+					envSection.WriteString("If the selected provider has native secret support, store/pass them through that provider's native secret or secure env mechanism; otherwise write a root-owned runtime env file with chmod 600. Never use a secret store from a different cloud provider and never print secret values.\n")
+				} else {
+					envSection.WriteString("\n## User-Provided Secrets (ALL must be stored in provider-native secrets)\n")
+					envSection.WriteString("The user provided values for the following env vars. You MUST create provider-native secret/env commands for EACH of them before launching the workload:\n")
+				}
 				for _, k := range extraEnv {
 					envSection.WriteString(fmt.Sprintf("- %s\n", k))
 				}
@@ -1239,31 +1253,42 @@ Examples:
 
 		// Inject user config into output bindings for native Node.js deployment
 		if userConfig != nil {
-			for name, value := range userConfig.EnvVars {
-				outputBindings["ENV_"+name] = value
-				outputBindings[name] = value
-			}
-			outputBindings["APP_PORT"] = fmt.Sprintf("%d", userConfig.AppPort)
-			// Also pass PORT as env var so the container knows which port to listen on
-			outputBindings["ENV_PORT"] = fmt.Sprintf("%d", userConfig.AppPort)
-			outputBindings["DEPLOY_MODE"] = userConfig.DeployMode
-
-			// Pass start command with port for containers that need --port flag
-			if intel.DeepAnalysis != nil && intel.DeepAnalysis.StartCommand != "" && userConfig.AppPort > 0 {
-				// Build start command with correct port (e.g., "node app.js --port 18789")
-				startCmd := intel.DeepAnalysis.StartCommand
-				// Replace common port placeholders or append port flag
-				if !strings.Contains(startCmd, fmt.Sprintf("%d", userConfig.AppPort)) {
-					// If the command doesn't already include the correct port, append it
-					startCmd = fmt.Sprintf("%s --port %d", startCmd, userConfig.AppPort)
+			if sreMode {
+				for name, value := range userConfig.EnvVars {
+					name = strings.TrimSpace(name)
+					if name == "" {
+						continue
+					}
+					outputBindings["ENV_"+name] = value
+					outputBindings[name] = value
 				}
-				outputBindings["START_COMMAND"] = startCmd
-			}
+			} else {
+				for name, value := range userConfig.EnvVars {
+					outputBindings["ENV_"+name] = value
+					outputBindings[name] = value
+				}
+				outputBindings["APP_PORT"] = fmt.Sprintf("%d", userConfig.AppPort)
+				// Also pass PORT as env var so the container knows which port to listen on
+				outputBindings["ENV_PORT"] = fmt.Sprintf("%d", userConfig.AppPort)
+				outputBindings["DEPLOY_MODE"] = userConfig.DeployMode
 
-			// Generate native Node.js user-data if not using Docker
-			if userConfig.DeployMode == "native" {
-				outputBindings["NODEJS_USER_DATA"] = deploy.GenerateNodeJSUserData(rp.RepoURL, intel.DeepAnalysis, userConfig)
-				fmt.Fprintf(os.Stderr, "[deploy] using native Node.js deployment (PM2)\n")
+				// Pass start command with port for containers that need --port flag
+				if intel.DeepAnalysis != nil && intel.DeepAnalysis.StartCommand != "" && userConfig.AppPort > 0 {
+					// Build start command with correct port (e.g., "node app.js --port 18789")
+					startCmd := intel.DeepAnalysis.StartCommand
+					// Replace common port placeholders or append port flag
+					if !strings.Contains(startCmd, fmt.Sprintf("%d", userConfig.AppPort)) {
+						// If the command doesn't already include the correct port, append it
+						startCmd = fmt.Sprintf("%s --port %d", startCmd, userConfig.AppPort)
+					}
+					outputBindings["START_COMMAND"] = startCmd
+				}
+
+				// Generate native Node.js user-data if not using Docker
+				if userConfig.DeployMode == "native" {
+					outputBindings["NODEJS_USER_DATA"] = deploy.GenerateNodeJSUserData(rp.RepoURL, intel.DeepAnalysis, userConfig)
+					fmt.Fprintf(os.Stderr, "[deploy] using native Node.js deployment (PM2)\n")
+				}
 			}
 		}
 		if isOpenClawDeploy {
@@ -1792,7 +1817,7 @@ func buildOneClickDeployObjective(provider, method string, enforceImageDeploy bo
 		if deployID == "" {
 			deployID = "$CLANKER_SRE_DEPLOY_ID"
 		}
-		return fmt.Sprintf("[one-click SRE deploy objective]\nGenerate command plan steps that deploy only the long-running Clanker SRE agent, not the analyzed app. Use provider=%s and the smallest practical always-on runtime for that provider. Prefer ghcr.io/bgdnvk/clanker:latest and run: clanker sre run --sre --target cloud-vm --provider %s --deploy-id %s. The runtime MUST set CLANKER_CEREBRO_URL, CLANKER_CEREBRO_INGEST_TOKEN, CLANKER_SRE_DEPLOY_ID, and CLANKER_SRE_PROVIDER. Tag or label every created resource with clanker-sre=true and clanker-sre-deploy-id=%s. Keep commands idempotent, preserve created resource IDs, and include a final non-secret health/verification command that checks the service/container is still running. Never print token values.", prov, prov, deployID, deployID)
+		return fmt.Sprintf("[one-click SRE deploy objective]\nGenerate command plan steps that deploy only the long-running Clanker SRE agent, not the analyzed app. Use provider=%s and the smallest practical always-on runtime for that provider. Prefer ghcr.io/bgdnvk/clanker:latest and run: clanker sre run --sre --target cloud-vm --provider %s --deploy-id %s --interval 60s. The runtime MUST set CLANKER_CEREBRO_URL, CLANKER_CEREBRO_INGEST_TOKEN, CLANKER_SRE_DEPLOY_ID, and CLANKER_SRE_PROVIDER from backend-provided env/secret values. Tag or label every created resource with clanker-sre=true and clanker-sre-deploy-id=%s. Keep commands idempotent, preserve created resource IDs, and include a final non-secret health/verification command that checks the service/container is still running. Cost guardrail: create one tiny observer only; avoid NAT gateways, ALBs, managed databases, Kubernetes control planes, app build/deploy resources, and polling intervals below 60s. Never print token values.\n\n%s", prov, prov, deployID, deployID, sreObserverPermissionContract(prov, deployID))
 	}
 	m := strings.ToLower(strings.TrimSpace(method))
 	if m == "" {
@@ -1802,6 +1827,31 @@ func buildOneClickDeployObjective(provider, method string, enforceImageDeploy bo
 		return fmt.Sprintf("[one-click deploy objective]\nGenerate command plan steps for one-click deploy. The runner executes plan.commands strictly in order, sequentially, to provision infrastructure and ship the app to production.\nUse provider=%s method=%s. Keep commands actionable/idempotent and preserve earlier produced bindings for later steps.\nImage deployment is enforced: do not rely on docker build on EC2 user-data. Ensure ECR image build/push + IMAGE_URI/ECR_URI bindings are preserved and workload launches by pulling that image.", prov, m)
 	}
 	return fmt.Sprintf("[one-click deploy objective]\nGenerate command plan steps for one-click deploy. The runner executes plan.commands strictly in order, sequentially, to provision infrastructure and ship the app to production.\nUse provider=%s method=%s. Keep commands actionable/idempotent and preserve earlier produced bindings for later steps.", prov, m)
+}
+
+func sreObserverPermissionContract(provider, deployID string) string {
+	identityName := "clanker-sre-observer"
+	if trimmed := strings.TrimSpace(deployID); trimmed != "" && !strings.Contains(trimmed, "$") {
+		identityName += "-" + trimmed
+	}
+	common := fmt.Sprintf("SRE observer identity contract: create or reuse a provider-native read-only observer identity named %s, attach it to the SRE runtime, and verify it with the provider's identity command plus at least one real read/list/describe collector command. The deploy-time credentials may create roles/service accounts/secrets, but the SRE runtime identity must be read-only for infrastructure observation. Secrets may be stored in Clanker Cloud SQLite before deploy and then copied into provider-native runtime secret/env configuration; do not ask the user for tokens.", identityName)
+
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "aws":
+		return common + " AWS: create an IAM policy/role or instance profile/task role for the SRE runtime. Required read actions include sts:GetCallerIdentity, cloudwatch:DescribeAlarms, cloudwatch:GetMetricStatistics, lambda:ListFunctions, ecs:ListClusters, ecs:ListServices, ecs:Describe*, eks:ListClusters, eks:DescribeCluster, rds:DescribeDBInstances, elasticache:DescribeCacheClusters, dynamodb:ListTables, dynamodb:DescribeTable, sqs:ListQueues, sqs:GetQueueAttributes, apigateway:GET, ec2:Describe*, s3:ListAllMyBuckets, s3:GetBucketLocation, states:ListStateMachines, cloudtrail:LookupEvents, iam:GenerateCredentialReport, iam:GetCredentialReport, route53:ListHealthChecks, logs:DescribeLogGroups, and resourcegroupstaggingapi:GetResources. Attach it to EC2/ECS/App Runner/Lambda with native IAM, not static AWS keys."
+	case "gcp":
+		return common + " GCP: create a service account for the SRE runtime and grant project-level viewer-style roles needed by the collectors: roles/viewer, roles/monitoring.viewer, roles/logging.viewer, roles/errorreporting.viewer, roles/cloudasset.viewer, roles/bigquery.metadataViewer, and service-specific viewer roles when the selected project requires them. Attach the service account to Cloud Run, Compute, or GKE using native IAM; do not bake service account JSON into images."
+	case "azure":
+		return common + " Azure: create or reuse a managed identity/service principal for the SRE runtime, assign Reader plus Monitoring Reader at the subscription or selected resource-group scope, and attach the identity to Container Apps, App Service, AKS, or VM using Azure-native identity. Store runtime secrets in Key Vault or native app secrets when available."
+	case "digitalocean":
+		return common + " DigitalOcean: use the backend-provided DigitalOcean token from SQLite/runtime injection and store it as a DO App secret env var named DIGITALOCEAN_ACCESS_TOKEN, or as a root-owned env file on Droplets. Prefer read-scoped tokens when the provider account supports scopes. Do not print the token."
+	case "hetzner":
+		return common + " Hetzner: use the backend-provided HCLOUD_TOKEN from SQLite/runtime injection, prefer a read-only project token when available, and store it as a locked-down runtime env secret or root-owned env file with chmod 600. Do not print the token."
+	case "cloudflare":
+		return common + " Cloudflare: use Cloudflare-native Worker/Container secret bindings for the backend-provided token and require an API token scoped to Account/Zone/Workers/D1/R2/Pages/Logs read capabilities needed by the collectors. This path is valid only when provider=cloudflare."
+	default:
+		return common + " Use only the selected provider's native identity and secret mechanisms. If the provider cannot create a scoped observer identity automatically, reuse the backend-managed secret from SQLite and store it in the provider's runtime secret/env mechanism without printing it."
+	}
 }
 
 func seedOpenClawRuntimeEnvBindings(bindings map[string]string, cfg *deploy.UserConfig) {
@@ -2155,10 +2205,11 @@ func init() {
 	deployCmd.Flags().String("deepseek-model", "", "DeepSeek model to use (overrides config)")
 	deployCmd.Flags().String("cohere-model", "", "Cohere model to use (overrides config)")
 	deployCmd.Flags().String("minimax-model", "", "MiniMax model to use (overrides config)")
+	deployCmd.Flags().String("github-model", "", "GitHub Models model to use (overrides config)")
 	deployCmd.Flags().Bool("apply", false, "Apply the plan immediately after generation")
 	deployCmd.Flags().String("provider", "aws", "Cloud provider: aws, gcp, azure, cloudflare, digitalocean, or hetzner")
 	deployCmd.Flags().String("target", "fargate", "Deployment target: fargate (default), ec2, or eks")
-	deployCmd.Flags().Bool("sre", false, "Include Clanker SRE install guidance for the deployed app")
+	deployCmd.Flags().Bool("sre", false, "Deploy only a low-cost Clanker SRE observer agent")
 	deployCmd.Flags().String("instance-type", "t3.small", "EC2 instance type (only used with --target ec2)")
 	deployCmd.Flags().Bool("new-vpc", false, "Create a new VPC instead of using default")
 	deployCmd.Flags().Bool("enforce-image-deploy", false, "Force ECR image-based deploy path (avoid docker build-on-EC2 user-data)")
@@ -2166,6 +2217,36 @@ func init() {
 	deployCmd.Flags().String("azure-subscription", "", "Azure subscription ID (required for --provider azure apply)")
 	deployCmd.Flags().String("do-token", "", "DigitalOcean access token (or set DIGITALOCEAN_ACCESS_TOKEN)")
 	deployCmd.Flags().String("hetzner-token", "", "Hetzner Cloud API token (or set HCLOUD_TOKEN)")
+}
+
+var sreDeployRuntimeEnvNames = []string{
+	"CLANKER_CEREBRO_URL",
+	"CLANKER_CEREBRO_INGEST_TOKEN",
+	"CLANKER_SRE_DEPLOY_ID",
+	"CLANKER_SRE_AGENT_ID",
+	"CLANKER_SRE_PROVIDER",
+	"CLANKER_SRE_RUNTIME_TARGET",
+	"CLANKER_SRE_INTERVAL",
+	"CLANKER_SRE_INTERVAL_SECONDS",
+	"CLANKER_SRE_EXPECT_HEARTBEAT",
+	"CLANKER_SRE_OBSERVER_IDENTITY_REQUIRED",
+	"CLANKER_SRE_PERMISSION_MODE",
+	"CLANKER_SRE_SECRET_STORE",
+}
+
+func seedSREEnvVarsFromProcess(envVars map[string]string) {
+	if envVars == nil {
+		return
+	}
+	for _, name := range sreDeployRuntimeEnvNames {
+		val := strings.TrimSpace(os.Getenv(name))
+		if val == "" {
+			continue
+		}
+		if strings.TrimSpace(envVars[name]) == "" {
+			envVars[name] = val
+		}
+	}
 }
 
 // splitPlanAtDockerBuild separates infrastructure setup from app deployment.

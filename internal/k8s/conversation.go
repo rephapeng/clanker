@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bgdnvk/clanker/internal/secfile"
 )
 
 // ConversationEntry represents a single Q&A exchange
@@ -177,17 +179,17 @@ func (h *ConversationHistory) Save() error {
 		return err
 	}
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := secfile.EnsurePrivateDir(dir); err != nil {
 		return fmt.Errorf("failed to create conversation directory: %w", err)
 	}
 
-	filename := filepath.Join(dir, fmt.Sprintf("k8s_%s.json", sanitizeFilename(h.ClusterName)))
+	filename := filepath.Join(dir, fmt.Sprintf("k8s_%s.json", secfile.SafeSlug(h.ClusterName)))
 	data, err := json.MarshalIndent(h, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal conversation history: %w", err)
 	}
 
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := secfile.WritePrivate(filename, data); err != nil {
 		return fmt.Errorf("failed to write conversation file: %w", err)
 	}
 
@@ -204,8 +206,8 @@ func (h *ConversationHistory) Load() error {
 		return err
 	}
 
-	filename := filepath.Join(dir, fmt.Sprintf("k8s_%s.json", sanitizeFilename(h.ClusterName)))
-	data, err := os.ReadFile(filename)
+	filename := filepath.Join(dir, fmt.Sprintf("k8s_%s.json", secfile.SafeSlug(h.ClusterName)))
+	data, err := secfile.ReadPrivate(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No history yet, that is fine
@@ -239,23 +241,6 @@ func getConversationDir() (string, error) {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
 	return filepath.Join(homeDir, ".clanker", "conversations"), nil
-}
-
-// sanitizeFilename replaces characters that are invalid in filenames
-func sanitizeFilename(s string) string {
-	replacer := strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		":", "_",
-		"*", "_",
-		"?", "_",
-		"\"", "_",
-		"<", "_",
-		">", "_",
-		"|", "_",
-		" ", "_",
-	)
-	return replacer.Replace(s)
 }
 
 // truncateText truncates text to maxLen characters, adding ellipsis if truncated
