@@ -166,6 +166,12 @@ func init() {
 	// (`clanker ask --tencent ...`) will land in a later phase.
 	tencentCmd := tencent.CreateTencentCommands()
 	rootCmd.AddCommand(tencentCmd)
+
+	rootCmd.AddCommand(newBoxCmd())
+
+	// Unified multi-provider logs (query/tail/chat) — drives the cloud app's
+	// logs viewer + talk-to-logs agent.
+	rootCmd.AddCommand(newLogsCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.

@@ -60,11 +60,24 @@ clanker update --channel main
 ### Requirements
 
 - Go
-- AWS CLI v2 (recommended; v1 breaks `--no-cli-pager`)
+- Provider CLIs only for the providers you want Clanker to inspect or manage
 
 ```bash
-brew install awscli
+clanker onboarding scan
+clanker onboarding scan --provider aws,gcp,azure,kubernetes,flyio,linear,notion --format json
+clanker onboarding install --dry-run --provider aws,gcp,azure,kubernetes,flyio
+clanker onboarding install --yes aws gcloud az kubectl flyctl
 ```
+
+`clanker onboarding scan` detects local credentials and missing provider CLIs,
+then returns official install docs, auth commands, and token/account URLs for
+users and agents. Install only the tools needed for selected or detected
+providers. Examples: AWS uses the official AWS CLI installer and local profiles,
+GCP uses the official Google Cloud CLI plus Application Default Credentials, and
+Azure uses the official Azure CLI sign-in flow. Agents that have been asked to
+install or use Clanker Cloud should run the install step, rerun the scan, then
+walk any remaining browser login, SSO, sudo, or official API-token step with the
+user.
 
 ## Config
 
@@ -93,15 +106,18 @@ If you run without `~/.clanker.yaml`:
 - OpenAI key order: `--openai-key` → `OPENAI_API_KEY` (also supports `ai.providers.openai.api_key` and `ai.providers.openai.api_key_env` if config exists).
 - Gemini API key order (when using `--ai-profile gemini-api`): `--gemini-key` → `GEMINI_API_KEY` (also supports `ai.providers.gemini-api.api_key` and `ai.providers.gemini-api.api_key_env` if config exists).
 - Cohere API key order (when using `--ai-profile cohere`): `--cohere-key` → `COHERE_API_KEY` (also supports `ai.providers.cohere.api_key` and `ai.providers.cohere.api_key_env` if config exists).
-- Model: `openai` defaults to `gpt-5`; `gemini`/`gemini-api` defaults to `gemini-3-pro-preview`; `cohere` defaults to `command-a-03-2025`.
+- Model: `openai` defaults to `gpt-5`; `gemini`/`gemini-api` defaults to `gemini-2.5-flash`; `cohere` defaults to `command-a-03-2025`.
 
 ### AWS
 
 Clanker uses your local AWS CLI profiles (not raw access keys in the clanker config).
 
-Create a profile:
+Create a profile with the official AWS CLI. Prefer SSO where your AWS account
+supports it; use access keys only when your account requires them.
 
 ```bash
+aws configure sso
+aws sso login --profile clankercloud-tekbog
 aws configure --profile clankercloud-tekbog | cat
 aws sts get-caller-identity --profile clankercloud-tekbog | cat
 ```
@@ -124,6 +140,35 @@ Override for a single command:
 
 ```bash
 clanker ask --aws --profile clankercloud-tekbog "what lambdas do we have?" | cat
+```
+
+### Cloud Provider Inventory Examples
+
+Use static `list` commands for read-only inventory without AI interpretation:
+
+```bash
+clanker aws list resources
+clanker aws list all-services
+clanker aws list bedrock-kb
+clanker gcp list services
+clanker gcp list resources
+clanker gcp list run-worker-pools
+clanker azure list resource-graph
+clanker azure list private-endpoints
+clanker azure list ai-search
+clanker cf list ai-search
+clanker cf list browser-sessions
+clanker cf list secrets-stores
+clanker cf list pipelines
+```
+
+Each provider exposes the full supported resource list through its help:
+
+```bash
+clanker aws list --help
+clanker gcp list --help
+clanker azure list --help
+clanker cf list --help
 ```
 
 ## Usage
@@ -150,6 +195,7 @@ The CLI MCP currently exposes tools to:
 - return Clanker routing decisions for a prompt
 - run local `clanker` commands through MCP, including `ask`, `openclaw`, and other subcommands
 - launch and talk to the Clanker Cloud desktop app through its local backend
+- inspect and chat with Kubernetes clusters through native `clanker_k8s_*` MCP tools, including `clanker_k8s_ask_cluster`
 
 Clanker chat routing also recognizes Clanker Cloud app questions now. If you use `clanker talk` and ask about the running desktop app or its saved settings, it will try the local Clanker Cloud backend first and fall back to Hermes if the app is not running.
 
@@ -207,6 +253,23 @@ The standalone CLI MCP currently exposes these tools:
 - `clanker_cloud_launch_app`
 - `clanker_cloud_ask_app`
 - `clanker_cloud_call_backend_api`
+- `clanker_k8s_list_clusters`
+- `clanker_k8s_get_resources`
+- `clanker_k8s_ask_cluster`
+- `clanker_k8s_logs`
+- `clanker_k8s_exec`
+- `clanker_k8s_scale`
+- `clanker_k8s_restart`
+- `clanker_k8s_rollout`
+- `clanker_k8s_apply`
+- `clanker_k8s_delete_resource`
+- `clanker_k8s_helm_install`
+- `clanker_k8s_helm_upgrade`
+- `clanker_k8s_helm_list`
+- `clanker_k8s_helm_uninstall`
+- `clanker_k8s_node_cordon`
+- `clanker_k8s_node_uncordon`
+- `clanker_k8s_node_drain`
 
 Flags:
 
@@ -470,6 +533,23 @@ clanker k8s ask "now show me its logs"
 clanker k8s ask --debug "how many pods are running"
 ```
 
+MCP agents can use the same pipeline through `clanker_k8s_ask_cluster` after starting `clanker mcp`. The tool accepts `question`, optional `cluster`, `context`, `namespace`, `kubeconfig`, `profile`, `provider`, `gcpProject`, `gcpRegion`, `aiProfile`, and `model` fields so agents can ask any reachable EKS, GKE, or kubeconfig-backed cluster without shelling through a generic command tool.
+
+```json
+{
+  "name": "clanker_k8s_ask_cluster",
+  "arguments": {
+    "question": "which pods are unhealthy and what should I check next?",
+    "cluster": "prod-gke",
+    "provider": "gke",
+    "gcpProject": "prod-project",
+    "gcpRegion": "us-central1",
+    "namespace": "payments",
+    "model": "gpt-5.1"
+  }
+}
+```
+
 #### K8s Ask Flags
 
 | Flag              | Description                                         |
@@ -480,6 +560,7 @@ clanker k8s ask --debug "how many pods are running"
 | `--context`       | kubectl context to use (overrides --cluster)        |
 | `-n, --namespace` | Default namespace for queries                       |
 | `--ai-profile`    | AI profile to use for LLM queries                   |
+| `--model`         | AI model for the selected AI profile                |
 | `--debug`         | Show detailed debug output including LLM operations |
 
 ### Legacy Natural Language Queries (via `clanker ask`)
@@ -528,17 +609,33 @@ digitalocean:
 
 ```bash
 # List resources directly (no AI)
+clanker do list account
 clanker do list droplets
+clanker do list droplet-autoscale
 clanker do list kubernetes
 clanker do list databases
 clanker do list apps
+clanker do list functions
+clanker do list serverless-inference-models
+clanker do list dedicated-inference
+clanker do list gradient-agents --region tor1
 clanker do list load-balancers
+clanker do list cdns
 clanker do list volumes
+clanker do list nfs --region nyc3
 clanker do list vpcs
+clanker do list vpc-peerings
+clanker do list vpc-nat-gateways
 clanker do list domains
 clanker do list firewalls
+clanker do list reserved-ips
+clanker do list certificates
+clanker do list monitoring-alerts
 clanker do list registries
 clanker do list spaces
+
+# See the full current doctl-backed coverage list
+clanker do list --help
 ```
 
 ### AI Queries
@@ -605,7 +702,15 @@ clanker hetzner list floating-ips
 clanker hetzner list primary-ips
 clanker hetzner list ssh-keys
 clanker hetzner list images
+clanker hetzner list isos
 clanker hetzner list certificates
+clanker hetzner list placement-groups
+clanker hetzner list server-types
+clanker hetzner list locations
+clanker hetzner list datacenters
+
+# See the full hcloud-backed coverage list
+clanker hetzner list --help
 ```
 
 ### AI Queries

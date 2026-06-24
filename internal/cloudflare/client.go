@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -234,25 +235,66 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 	questionLower := strings.ToLower(strings.TrimSpace(question))
 
 	type section struct {
-		name     string
-		endpoint string
-		keys     []string
+		name           string
+		endpoint       string
+		keys           []string
+		requiresAcctID bool
 	}
 
 	sections := []section{
 		{name: "Zones", endpoint: "/zones", keys: []string{"zone", "domain", "dns", "site"}},
-		{name: "Account Details", endpoint: fmt.Sprintf("/accounts/%s", c.accountID), keys: []string{"account", "plan", "billing"}},
+		{name: "Account Details", endpoint: fmt.Sprintf("/accounts/%s", c.accountID), keys: []string{"account", "plan", "billing"}, requiresAcctID: true},
+		{name: "Workers Scripts", endpoint: fmt.Sprintf("/accounts/%s/workers/scripts", c.accountID), keys: []string{"worker", "workers", "script", "serverless", "edge compute"}, requiresAcctID: true},
+		{name: "Pages Projects", endpoint: fmt.Sprintf("/accounts/%s/pages/projects", c.accountID), keys: []string{"pages", "page", "static site", "frontend"}, requiresAcctID: true},
+		{name: "Workers KV Namespaces", endpoint: fmt.Sprintf("/accounts/%s/storage/kv/namespaces", c.accountID), keys: []string{"kv", "key value", "key-value", "namespace", "namespaces"}, requiresAcctID: true},
+		{name: "D1 Databases", endpoint: fmt.Sprintf("/accounts/%s/d1/database", c.accountID), keys: []string{"d1", "sqlite", "database", "databases"}, requiresAcctID: true},
+		{name: "R2 Buckets", endpoint: fmt.Sprintf("/accounts/%s/r2/buckets", c.accountID), keys: []string{"r2", "bucket", "buckets", "object storage", "storage"}, requiresAcctID: true},
+		{name: "Queues", endpoint: fmt.Sprintf("/accounts/%s/queues", c.accountID), keys: []string{"queue", "queues", "message", "event driven", "event-driven"}, requiresAcctID: true},
+		{name: "Vectorize Indexes", endpoint: fmt.Sprintf("/accounts/%s/vectorize/v2/indexes", c.accountID), keys: []string{"vectorize", "vector", "vectors", "embedding", "embeddings", "semantic search"}, requiresAcctID: true},
+		{name: "Hyperdrive Configs", endpoint: fmt.Sprintf("/accounts/%s/hyperdrive/configs", c.accountID), keys: []string{"hyperdrive", "postgres", "mysql", "database acceleration", "connection pooling"}, requiresAcctID: true},
+		{name: "AI Gateway", endpoint: fmt.Sprintf("/accounts/%s/ai-gateway/gateways", c.accountID), keys: []string{"ai gateway", "gateway", "llm gateway", "model gateway", "ai"}, requiresAcctID: true},
+		{name: "AI Search Namespaces", endpoint: fmt.Sprintf("/accounts/%s/ai-search/namespaces", c.accountID), keys: []string{"ai search", "search", "rag", "retrieval", "autorag"}, requiresAcctID: true},
+		{name: "Durable Object Namespaces", endpoint: fmt.Sprintf("/accounts/%s/workers/durable_objects/namespaces", c.accountID), keys: []string{"durable object", "durable objects", "stateful", "actor"}, requiresAcctID: true},
+		{name: "Browser Rendering Sessions", endpoint: fmt.Sprintf("/accounts/%s/browser-rendering/devtools/session", c.accountID), keys: []string{"browser rendering", "browser run", "browser session", "headless browser"}, requiresAcctID: true},
+		{name: "Cloudflare Images", endpoint: fmt.Sprintf("/accounts/%s/images/v2", c.accountID), keys: []string{"cloudflare images", "image", "images", "media"}, requiresAcctID: true},
+		{name: "Cloudflare Stream", endpoint: fmt.Sprintf("/accounts/%s/stream", c.accountID), keys: []string{"stream", "video", "videos", "media"}, requiresAcctID: true},
+		{name: "Secrets Store", endpoint: fmt.Sprintf("/accounts/%s/secrets_store/stores", c.accountID), keys: []string{"secrets store", "secret store", "account secrets"}, requiresAcctID: true},
+		{name: "Pipelines", endpoint: fmt.Sprintf("/accounts/%s/pipelines/v1/pipelines", c.accountID), keys: []string{"pipeline", "pipelines", "etl", "data pipeline"}, requiresAcctID: true},
+		{name: "Pipeline Sinks", endpoint: fmt.Sprintf("/accounts/%s/pipelines/v1/sinks", c.accountID), keys: []string{"pipeline sink", "pipeline sinks", "data sink"}, requiresAcctID: true},
+		{name: "Pipeline Streams", endpoint: fmt.Sprintf("/accounts/%s/pipelines/v1/streams", c.accountID), keys: []string{"pipeline stream", "pipeline streams", "data stream"}, requiresAcctID: true},
+		{name: "Turnstile Widgets", endpoint: fmt.Sprintf("/accounts/%s/challenges/widgets", c.accountID), keys: []string{"turnstile", "captcha", "challenge"}, requiresAcctID: true},
+		{name: "Zero Trust Tunnels", endpoint: fmt.Sprintf("/accounts/%s/cfd_tunnel", c.accountID), keys: []string{"tunnel", "tunnels", "zero trust", "cloudflared"}, requiresAcctID: true},
+		{name: "Logpush Jobs", endpoint: fmt.Sprintf("/accounts/%s/logpush/jobs", c.accountID), keys: []string{"logpush", "logs", "observability"}, requiresAcctID: true},
+		{name: "Rules Lists", endpoint: fmt.Sprintf("/accounts/%s/rules/lists", c.accountID), keys: []string{"rules list", "rules lists", "ip list"}, requiresAcctID: true},
+		{name: "Account Roles", endpoint: fmt.Sprintf("/accounts/%s/roles", c.accountID), keys: []string{"account role", "roles", "iam"}, requiresAcctID: true},
+		{name: "Account Members", endpoint: fmt.Sprintf("/accounts/%s/members", c.accountID), keys: []string{"member", "members", "users"}, requiresAcctID: true},
 	}
 
 	// Default sections to include
 	defaultSections := map[string]bool{
-		"Zones": true,
+		"Zones":           true,
+		"Workers Scripts": c.accountID != "",
+		"D1 Databases":    c.accountID != "",
+		"R2 Buckets":      c.accountID != "",
 	}
 
 	var out strings.Builder
 	var warnings []string
+	var aiGatewayBody string
 
 	for _, s := range sections {
+		if s.requiresAcctID && strings.TrimSpace(c.accountID) == "" {
+			if questionLower != "" {
+				for _, key := range s.keys {
+					if strings.Contains(questionLower, key) {
+						warnings = append(warnings, fmt.Sprintf("%s: Cloudflare account ID is required (set CLOUDFLARE_ACCOUNT_ID or cloudflare.account_id)", s.name))
+						break
+					}
+				}
+			}
+			continue
+		}
+
 		// Check if this section is relevant to the question
 		if questionLower != "" && len(s.keys) > 0 {
 			matched := false
@@ -272,10 +314,23 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 			warnings = append(warnings, fmt.Sprintf("%s: %v", s.name, err))
 			continue
 		}
+		if s.name == "AI Gateway" {
+			aiGatewayBody = result
+		}
 
 		formatted := formatAPIResponse(s.name, result)
 		if formatted != "" {
 			out.WriteString(formatted)
+			out.WriteString("\n")
+		}
+	}
+
+	if cloudflareObservabilityLogIntent(questionLower) && strings.TrimSpace(c.accountID) != "" {
+		logsContext, err := c.collectAIGatewayLogsContext(ctx, aiGatewayBody)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("AI Gateway Logs: %v", err))
+		} else if strings.TrimSpace(logsContext) != "" {
+			out.WriteString(logsContext)
 			out.WriteString("\n")
 		}
 	}
@@ -299,6 +354,163 @@ func (c *Client) GetRelevantContext(ctx context.Context, question string) (strin
 	}
 
 	return out.String(), nil
+}
+
+func cloudflareObservabilityLogIntent(questionLower string) bool {
+	return containsAnyCloudflarePhrase(questionLower,
+		"log", "logs", "event", "events", "error", "errors", "warning", "warnings",
+		"trace", "traces", "metric", "metrics", "observability", "incident", "incidents")
+}
+
+func containsAnyCloudflarePhrase(value string, phrases ...string) bool {
+	for _, phrase := range phrases {
+		if strings.Contains(value, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+type aiGatewaySummary struct {
+	ID   string
+	Name string
+}
+
+func (c *Client) collectAIGatewayLogsContext(ctx context.Context, gatewaysBody string) (string, error) {
+	gateways, err := parseAIGateways(gatewaysBody)
+	if err != nil || len(gateways) == 0 {
+		fetched, fetchErr := c.RunAPIWithContext(ctx, "GET", fmt.Sprintf("/accounts/%s/ai-gateway/gateways", c.accountID), "")
+		if fetchErr != nil {
+			if err != nil {
+				return "", fmt.Errorf("%v; list gateways: %w", err, fetchErr)
+			}
+			return "", fetchErr
+		}
+		gateways, err = parseAIGateways(fetched)
+		if err != nil {
+			return "", err
+		}
+	}
+	if len(gateways) == 0 {
+		return "AI Gateway Logs:\nNo Cloudflare AI Gateway gateways found.\n", nil
+	}
+
+	maxGateways := minCloudflareInt(len(gateways), 3)
+	var out strings.Builder
+	out.WriteString("AI Gateway Logs:\n")
+	for i := 0; i < maxGateways; i++ {
+		gateway := gateways[i]
+		gatewayID := strings.TrimSpace(gateway.ID)
+		if gatewayID == "" {
+			continue
+		}
+		name := strings.TrimSpace(gateway.Name)
+		if name == "" {
+			name = gatewayID
+		}
+		body, err := c.RunAPIWithContext(ctx, "GET", fmt.Sprintf("/accounts/%s/ai-gateway/gateways/%s/logs", c.accountID, url.PathEscape(gatewayID)), "")
+		if err != nil {
+			out.WriteString(fmt.Sprintf("%s: logs unavailable: %v\n", name, err))
+			continue
+		}
+		out.WriteString(fmt.Sprintf("%s:\n", name))
+		out.WriteString(indentCloudflareLines(truncateCloudflareContext(strings.TrimSpace(body), 2500), "  "))
+	}
+	if len(gateways) > maxGateways {
+		out.WriteString(fmt.Sprintf("(... %d more gateways omitted)\n", len(gateways)-maxGateways))
+	}
+	return out.String(), nil
+}
+
+func parseAIGateways(body string) ([]aiGatewaySummary, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+		var envelope struct {
+			Result any `json:"result"`
+		}
+		if err2 := json.Unmarshal([]byte(trimmed), &envelope); err2 != nil {
+			return nil, err
+		}
+		switch typed := envelope.Result.(type) {
+		case []any:
+			raw = mapsFromAnySlice(typed)
+		case map[string]any:
+			if gateways, ok := typed["gateways"].([]any); ok {
+				raw = mapsFromAnySlice(gateways)
+			} else if items, ok := typed["items"].([]any); ok {
+				raw = mapsFromAnySlice(items)
+			} else {
+				raw = []map[string]any{typed}
+			}
+		}
+	}
+	gateways := make([]aiGatewaySummary, 0, len(raw))
+	for _, item := range raw {
+		id := cloudflareStringFromAny(item["id"])
+		if id == "" {
+			id = cloudflareStringFromAny(item["gateway_id"])
+		}
+		if id == "" {
+			id = cloudflareStringFromAny(item["slug"])
+		}
+		name := cloudflareStringFromAny(item["name"])
+		if id == "" {
+			continue
+		}
+		gateways = append(gateways, aiGatewaySummary{ID: id, Name: name})
+	}
+	return gateways, nil
+}
+
+func mapsFromAnySlice(values []any) []map[string]any {
+	out := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		if item, ok := value.(map[string]any); ok {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func cloudflareStringFromAny(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
+func truncateCloudflareContext(value string, max int) string {
+	if strings.TrimSpace(value) == "" {
+		return "(no output)"
+	}
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	return value[:max] + "...<truncated>"
+}
+
+func indentCloudflareLines(value string, prefix string) string {
+	lines := strings.Split(value, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func minCloudflareInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // checkAPIError checks if the API response contains an error
