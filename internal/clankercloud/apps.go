@@ -7,10 +7,23 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 var appIdempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
+
+const (
+	appsAPIPath                      = "/v1/apps"
+	MaxAppHTMLBytes                  = 2 << 20
+	MaxAppAgenticDailyRequests       = 25
+	MaxAppAgenticInputCharacters     = 16000
+	MaxAppAgenticOutputTokens        = 1024
+	DefaultAppAgenticDailyRequests   = MaxAppAgenticDailyRequests
+	DefaultAppAgenticInputCharacters = MaxAppAgenticInputCharacters
+	DefaultAppAgenticOutputTokens    = MaxAppAgenticOutputTokens
+)
 
 type AppsClient struct {
 	httpClient *http.Client
@@ -26,13 +39,6 @@ type AppsClientOptions struct {
 
 type AppsAPIResult = APIResult
 
-type AppFile struct {
-	Path        string  `json:"path"`
-	Content     *string `json:"content,omitempty"`
-	Base64      *string `json:"base64,omitempty"`
-	ContentType string  `json:"contentType,omitempty"`
-}
-
 type AppCreateRequest struct {
 	Name           string         `json:"name"`
 	Description    string         `json:"description,omitempty"`
@@ -41,21 +47,24 @@ type AppCreateRequest struct {
 	IdempotencyKey string         `json:"-"`
 }
 
-// AppDeploymentInput creates an immutable private deployment. It does not
-// activate or publish that deployment.
-type AppDeploymentInput struct {
-	HTML          string         `json:"html,omitempty"`
-	Files         []AppFile      `json:"files,omitempty"`
-	Entrypoint    string         `json:"entrypoint,omitempty"`
-	SPA           bool           `json:"spa,omitempty"`
-	DataSummary   map[string]any `json:"dataSummary,omitempty"`
-	NetworkPolicy string         `json:"networkPolicy"`
-	Exposure      map[string]any `json:"exposure,omitempty"`
+type AppDeploymentCreateRequest struct {
+	AppSpec        *AppSpec          `json:"appSpec,omitempty"`
+	HTML           *string           `json:"html,omitempty"`
+	Agentic        *AppAgenticConfig `json:"agentic,omitempty"`
+	IdempotencyKey string            `json:"-"`
 }
 
-type AppDeploymentCreateRequest struct {
-	AppDeploymentInput
-	IdempotencyKey string `json:"-"`
+type AppAgenticConfig struct {
+	Providers          []string `json:"providers"`
+	DailyRequestLimit  int      `json:"dailyRequestLimit"`
+	MaxInputCharacters int      `json:"maxInputCharacters"`
+	MaxOutputTokens    int      `json:"maxOutputTokens"`
+}
+
+// Avoid changing supplied HTML and canonical appSpec display text into JSON
+// escape sequences before the service applies its byte limits.
+func (AppDeploymentCreateRequest) escapeHTMLInCloudJSON() bool {
+	return false
 }
 
 func NewAppsClient(opts AppsClientOptions) *AppsClient {
@@ -92,7 +101,7 @@ func (c *AppsClient) AccountKey() string {
 }
 
 func (c *AppsClient) ListApps(ctx context.Context) (*AppsAPIResult, error) {
-	return c.callJSON(ctx, http.MethodGet, "/apps", nil, "")
+	return c.callJSON(ctx, http.MethodGet, appsAPIPath, nil, "")
 }
 
 func (c *AppsClient) CreateApp(ctx context.Context, payload AppCreateRequest) (*AppsAPIResult, error) {
@@ -106,7 +115,7 @@ func (c *AppsClient) CreateApp(ctx context.Context, payload AppCreateRequest) (*
 	payload.Name = strings.TrimSpace(payload.Name)
 	payload.Description = strings.TrimSpace(payload.Description)
 	payload.ProjectID = strings.TrimSpace(payload.ProjectID)
-	return c.callJSON(ctx, http.MethodPost, "/apps", payload, idempotencyKey)
+	return c.callJSON(ctx, http.MethodPost, appsAPIPath, payload, idempotencyKey)
 }
 
 func (c *AppsClient) GetApp(ctx context.Context, appID string) (*AppsAPIResult, error) {
@@ -114,7 +123,7 @@ func (c *AppsClient) GetApp(ctx context.Context, appID string) (*AppsAPIResult, 
 	if err != nil {
 		return nil, err
 	}
-	return c.callJSON(ctx, http.MethodGet, "/apps/"+escaped, nil, "")
+	return c.callJSON(ctx, http.MethodGet, appsAPIPath+"/"+escaped, nil, "")
 }
 
 func (c *AppsClient) DeleteApp(ctx context.Context, appID string) (*AppsAPIResult, error) {
@@ -122,7 +131,7 @@ func (c *AppsClient) DeleteApp(ctx context.Context, appID string) (*AppsAPIResul
 	if err != nil {
 		return nil, err
 	}
-	return c.callJSON(ctx, http.MethodDelete, "/apps/"+escaped, nil, "")
+	return c.callJSON(ctx, http.MethodDelete, appsAPIPath+"/"+escaped, nil, "")
 }
 
 func (c *AppsClient) ListDeployments(ctx context.Context, appID string) (*AppsAPIResult, error) {
@@ -130,7 +139,7 @@ func (c *AppsClient) ListDeployments(ctx context.Context, appID string) (*AppsAP
 	if err != nil {
 		return nil, err
 	}
-	return c.callJSON(ctx, http.MethodGet, "/apps/"+escaped+"/deployments", nil, "")
+	return c.callJSON(ctx, http.MethodGet, appsAPIPath+"/"+escaped+"/deployments", nil, "")
 }
 
 func (c *AppsClient) CreateDeployment(ctx context.Context, appID string, payload AppDeploymentCreateRequest) (*AppsAPIResult, error) {
@@ -138,34 +147,89 @@ func (c *AppsClient) CreateDeployment(ctx context.Context, appID string, payload
 	if err != nil {
 		return nil, err
 	}
-	hasHTML := payload.HTML != ""
-	hasFiles := len(payload.Files) > 0
-	if hasHTML == hasFiles {
-		return nil, fmt.Errorf("provide exactly one of deployment html or files")
+	hasAppSpec := payload.AppSpec != nil
+	hasHTML := payload.HTML != nil
+	if hasAppSpec == hasHTML {
+		return nil, fmt.Errorf("provide exactly one of deployment appSpec or html")
 	}
-	for _, file := range payload.Files {
-		if strings.TrimSpace(file.Path) == "" {
-			return nil, fmt.Errorf("deployment file path is required")
+	if payload.Agentic != nil {
+		if !hasHTML {
+			return nil, fmt.Errorf("agentic is only supported for html deployments")
 		}
-		if (file.Content == nil) == (file.Base64 == nil) {
-			return nil, fmt.Errorf("%s must provide exactly one of content or base64", strings.TrimSpace(file.Path))
+		normalized, err := ValidateAppAgenticConfig(*payload.Agentic)
+		if err != nil {
+			return nil, err
 		}
+		payload.Agentic = &normalized
 	}
-	if strings.TrimSpace(payload.Entrypoint) == "" {
-		payload.Entrypoint = "index.html"
-	}
-	if strings.TrimSpace(payload.NetworkPolicy) == "" {
-		payload.NetworkPolicy = "none"
-	}
-	if !strings.EqualFold(strings.TrimSpace(payload.NetworkPolicy), "none") {
-		return nil, fmt.Errorf("network policy must be none for static app deployments")
+	if hasAppSpec {
+		normalized := normalizeAppSpec(*payload.AppSpec)
+		if err := ValidateAppSpec(normalized); err != nil {
+			return nil, err
+		}
+		payload.AppSpec = &normalized
+	} else {
+		if !utf8.ValidString(*payload.HTML) {
+			return nil, fmt.Errorf("deployment html must be valid UTF-8")
+		}
+		if len(*payload.HTML) == 0 {
+			return nil, fmt.Errorf("deployment html must not be empty")
+		}
+		if len(*payload.HTML) > MaxAppHTMLBytes {
+			return nil, fmt.Errorf("deployment html exceeds %d bytes", MaxAppHTMLBytes)
+		}
 	}
 	idempotencyKey, err := ValidateAppIdempotencyKey(payload.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
-	payload.NetworkPolicy = "none"
-	return c.callJSON(ctx, http.MethodPost, "/apps/"+escaped+"/deployments", payload, idempotencyKey)
+	return c.callJSON(ctx, http.MethodPost, appsAPIPath+"/"+escaped+"/deployments", payload, idempotencyKey)
+}
+
+// ValidateAppAgenticConfig mirrors the hosted Apps launch contract and returns
+// its canonical provider ordering for stable deployment request identity.
+func ValidateAppAgenticConfig(input AppAgenticConfig) (AppAgenticConfig, error) {
+	if len(input.Providers) == 0 || len(input.Providers) > 2 {
+		return AppAgenticConfig{}, fmt.Errorf("agentic.providers must contain one or two providers")
+	}
+	providers := make([]string, 0, len(input.Providers))
+	seen := make(map[string]struct{}, len(input.Providers))
+	for _, raw := range input.Providers {
+		provider := strings.ToLower(strings.TrimSpace(raw))
+		if provider != "gemini" && provider != "kimi" {
+			return AppAgenticConfig{}, fmt.Errorf("agentic.providers may contain only gemini or kimi")
+		}
+		if _, ok := seen[provider]; ok {
+			return AppAgenticConfig{}, fmt.Errorf("agentic.providers must not contain duplicates")
+		}
+		seen[provider] = struct{}{}
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+	if input.DailyRequestLimit < 1 || input.DailyRequestLimit > MaxAppAgenticDailyRequests {
+		return AppAgenticConfig{}, fmt.Errorf(
+			"agentic.dailyRequestLimit must be between 1 and %d",
+			MaxAppAgenticDailyRequests,
+		)
+	}
+	if input.MaxInputCharacters < 1 || input.MaxInputCharacters > MaxAppAgenticInputCharacters {
+		return AppAgenticConfig{}, fmt.Errorf(
+			"agentic.maxInputCharacters must be between 1 and %d",
+			MaxAppAgenticInputCharacters,
+		)
+	}
+	if input.MaxOutputTokens < 1 || input.MaxOutputTokens > MaxAppAgenticOutputTokens {
+		return AppAgenticConfig{}, fmt.Errorf(
+			"agentic.maxOutputTokens must be between 1 and %d",
+			MaxAppAgenticOutputTokens,
+		)
+	}
+	return AppAgenticConfig{
+		Providers:          providers,
+		DailyRequestLimit:  input.DailyRequestLimit,
+		MaxInputCharacters: input.MaxInputCharacters,
+		MaxOutputTokens:    input.MaxOutputTokens,
+	}, nil
 }
 
 func (c *AppsClient) ActivateDeployment(ctx context.Context, appID string, deploymentID string) (*AppsAPIResult, error) {
@@ -177,7 +241,7 @@ func (c *AppsClient) ActivateDeployment(ctx context.Context, appID string, deplo
 	if err != nil {
 		return nil, err
 	}
-	path := "/apps/" + escapedAppID + "/deployments/" + escapedDeploymentID + "/activate"
+	path := appsAPIPath + "/" + escapedAppID + "/deployments/" + escapedDeploymentID + "/activate"
 	return c.callJSON(ctx, http.MethodPost, path, map[string]any{}, "")
 }
 
@@ -186,7 +250,7 @@ func (c *AppsClient) UnpublishApp(ctx context.Context, appID string) (*AppsAPIRe
 	if err != nil {
 		return nil, err
 	}
-	return c.callJSON(ctx, http.MethodPost, "/apps/"+escaped+"/unpublish", map[string]any{}, "")
+	return c.callJSON(ctx, http.MethodPost, appsAPIPath+"/"+escaped+"/unpublish", map[string]any{}, "")
 }
 
 func (c *AppsClient) callJSON(ctx context.Context, method string, path string, body any, idempotencyKey string) (*AppsAPIResult, error) {
