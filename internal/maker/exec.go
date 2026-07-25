@@ -5,7 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -81,7 +81,7 @@ func shortStableHash(s string) string {
 	if s == "" {
 		return ""
 	}
-	sum := sha1.Sum([]byte(s))
+	sum := sha256.Sum256([]byte(s))
 	// 6 hex chars is enough for collision avoidance in practice here.
 	return fmt.Sprintf("%x", sum)[:6]
 }
@@ -252,6 +252,11 @@ type ExecOptions struct {
 	TencentSecretID  string
 	TencentSecretKey string
 	TencentRegion    string
+
+	// Oracle Cloud Infrastructure options
+	OracleProfile       string
+	OracleCompartmentID string
+	OracleTenancyOCID   string
 
 	CheckpointKey            string
 	DisableDurableCheckpoint bool

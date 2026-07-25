@@ -8,6 +8,8 @@ Agent swarm powering [Clanker Cloud](https://clankercloud.ai), the first AI DevO
 
 Docs available at [docs.clankercloud.ai](https://docs.clankercloud.ai/)
 
+Language: English | [简体中文](README.zh-CN.md)
+
 Ask questions about your infra (and optionally GitHub/etc). Clanker can inspect existing environments and also generate or apply infrastructure and deploy plans through its maker and deploy flows.
 
 Repo: [bgdnvk/clanker](https://github.com/bgdnvk/clanker)
@@ -172,6 +174,134 @@ clanker cf list --help
 ```
 
 ## Usage
+
+### Clanker Apps
+
+Clanker Apps are account-scoped, immutable deployments for small team software.
+Deploy a complete HTML document when you need working JavaScript, forms,
+browser storage, external resources, downloads, navigation, or API calls. The
+document runs as supplied at its own public app URL; network calls follow normal
+browser and API CORS behavior.
+
+Creating an app or deployment keeps it private. `activate` (also available as
+`publish` or `share`) publishes one deployment and returns its shareable link.
+The full JSON result stays available while a concise `Public URL:` line makes
+the link easy to copy. `unpublish` removes public access without removing
+retained versions. `delete` permanently disposes of the app, all versions, and
+hosted artifacts.
+
+For example, save a complete app as `index.html`, then deploy it:
+
+```html
+<!doctype html>
+<title>Team CRM</title>
+<main id="app"></main>
+<script>
+  const contacts = [{ name: "Ada", company: "Analytical Engines" }];
+  document.querySelector("#app").textContent =
+    `${contacts.length} contact: ${contacts[0].name}`;
+</script>
+```
+
+```bash
+export CLANKER_CLOUD_API_KEY="..."
+
+clanker cloud apps create "Team CRM" --description "Shared contact workspace"
+clanker cloud apps deploy APP_ID --html-file ./index.html
+clanker cloud apps deployments APP_ID
+clanker cloud apps share APP_ID DEPLOYMENT_ID
+clanker cloud apps unpublish APP_ID
+clanker cloud apps delete APP_ID
+```
+
+Single-file HTML deployments are valid UTF-8 and limited to 2 MiB. The CLI
+sends exactly the supplied HTML; it does not remove features or filter content.
+Deployment output identifies this runtime as `clanker-html-v1` and reports its
+file count, total bytes, and browser network policy.
+
+HTML apps can explicitly opt into hosted Gemini and/or Kimi calls without
+shipping provider credentials in the document:
+
+```bash
+clanker cloud apps deploy APP_ID \
+  --html-file ./agent.html \
+  --agentic-provider gemini \
+  --agentic-provider kimi
+```
+
+Inside the deployed HTML, derive the root-stable app endpoint before calling it
+so the request still works after client-side navigation:
+
+```js
+const slug = location.pathname.split("/")[2];
+const endpoint = `/a/${encodeURIComponent(slug)}/__clanker/llm`;
+const response = await fetch(endpoint, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    provider: "gemini",
+    messages: [{ role: "user", content: "Summarize these contacts" }],
+  }),
+});
+const result = await response.json();
+```
+
+Agentic access is absent unless at least one `--agentic-provider` is supplied.
+When enabled, the defaults are also the launch ceilings: 25 requests per app
+per UTC day, 16000 input characters per request, and 1024 output tokens per
+request.
+Lower them with `--agentic-daily-requests`, `--agentic-max-input-chars`, and
+`--agentic-max-output-tokens`. The limits must remain at least 1. Agentic
+options apply only to HTML deployments. These controls are versioned with the
+deployment, while the daily request counter is app-wide and continues across
+deployment activations until the next UTC day.
+
+The existing fixed-renderer `appSpec` v1 runtime remains available for
+declarative snapshots. Save a specification such as this as `app-spec.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "title": "Team CRM",
+  "description": "Shared contact workspace",
+  "theme": "ocean",
+  "blocks": [
+    {
+      "type": "metrics",
+      "title": "Overview",
+      "items": [{ "label": "Contacts", "value": "12" }]
+    },
+    {
+      "type": "table",
+      "title": "Contacts",
+      "columns": ["Name", "Company"],
+      "rows": [["Ada", "Analytical Engines"]]
+    }
+  ]
+}
+```
+
+```bash
+clanker cloud apps deploy APP_ID --app-spec-file ./app-spec.json
+```
+
+The v1 block types are `metrics`, `text`, `table`, `cards`, and `list`.
+Specifications are limited to 24 blocks and 256 KiB. Use exactly one of
+`--html`, `--html-file`, `--app-spec-json`, or `--app-spec-file` for each
+deployment.
+
+Create and deploy generate a valid idempotency key automatically. Pass
+`--idempotency-key` when you need the same stable key across manual retries.
+
+One-shot sandbox tasks require an account key, then dispose their compute and
+persistent sandbox storage before returning. If cleanup fails, the command
+prints the sandbox id and an exact `sandboxes delete` retry command. Use
+`--keep-sandbox` only for intentional debugging work:
+
+```bash
+clanker cloud sandboxes run "inspect this repository and summarize it"
+clanker cloud sandboxes run --keep-sandbox "prepare a debugging workspace"
+```
 
 ### MCP
 

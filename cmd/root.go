@@ -13,6 +13,7 @@ import (
 	"github.com/bgdnvk/clanker/internal/hetzner"
 	"github.com/bgdnvk/clanker/internal/linear"
 	"github.com/bgdnvk/clanker/internal/notion"
+	"github.com/bgdnvk/clanker/internal/oracle"
 	"github.com/bgdnvk/clanker/internal/railway"
 	"github.com/bgdnvk/clanker/internal/sentry"
 	"github.com/bgdnvk/clanker/internal/tencent"
@@ -140,6 +141,10 @@ func init() {
 	hetznerCmd := hetzner.CreateHetznerCommands()
 	rootCmd.AddCommand(hetznerCmd)
 
+	// Register Oracle Cloud Infrastructure static commands
+	oracleCmd := oracle.CreateOracleCommands()
+	rootCmd.AddCommand(oracleCmd)
+
 	// Register Vercel static commands. Natural-language queries go through
 	// `clanker ask --vercel "..."` — the canonical path that resolves
 	// credentials, fetches context, and drives the configured AI provider.
@@ -193,6 +198,9 @@ func initConfig() {
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err == nil {
+		if err := hardenUserConfigFile(viper.ConfigFileUsed()); err != nil && viper.GetBool("debug") {
+			fmt.Fprintf(os.Stderr, "warning: failed to secure config file permissions: %v\n", err)
+		}
 		if viper.GetBool("debug") {
 			fmt.Println("Using config file:", viper.ConfigFileUsed())
 		}

@@ -18,6 +18,7 @@ type ToolGuide struct {
 	ID              string              `json:"id"`
 	Tool            string              `json:"tool"`
 	Binary          string              `json:"binary"`
+	Aliases         []string            `json:"aliases,omitempty"`
 	Providers       []string            `json:"providers,omitempty"`
 	VerifyCommand   string              `json:"verifyCommand"`
 	InstallCommands map[string][]string `json:"installCommands"`
@@ -28,6 +29,7 @@ type ToolStatus struct {
 	ID              string              `json:"id"`
 	Tool            string              `json:"tool"`
 	Binary          string              `json:"binary"`
+	Aliases         []string            `json:"aliases,omitempty"`
 	Providers       []string            `json:"providers,omitempty"`
 	Installed       bool                `json:"installed"`
 	Path            string              `json:"path,omitempty"`
@@ -203,6 +205,19 @@ func Guides() map[string]ToolGuide {
 			},
 			DocsURL: "https://github.com/hetznercloud/cli",
 		},
+		"oci": {
+			ID:            "oci",
+			Tool:          "Oracle Cloud Infrastructure CLI",
+			Binary:        "oci",
+			Providers:     []string{"Oracle Cloud", "OCI", "OKE"},
+			VerifyCommand: "oci --version",
+			InstallCommands: map[string][]string{
+				"darwin":  {"bash -c \"$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)\""},
+				"linux":   {"bash -c \"$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)\""},
+				"windows": {"python -m pip install oci-cli"},
+			},
+			DocsURL: "https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm",
+		},
 		"kubectl": {
 			ID:            "kubectl",
 			Tool:          "kubectl",
@@ -320,6 +335,33 @@ func Guides() map[string]ToolGuide {
 			},
 			DocsURL: "https://fly.io/docs/flyctl/install/",
 		},
+		"tccli": {
+			ID:            "tccli",
+			Tool:          "Tencent Cloud CLI",
+			Binary:        "tccli",
+			Providers:     []string{"Tencent Cloud"},
+			VerifyCommand: "tccli --version",
+			InstallCommands: map[string][]string{
+				"darwin":  {"python3 -m pip install tccli-intl-en"},
+				"linux":   {"python3 -m pip install tccli-intl-en"},
+				"windows": {"py -m pip install tccli-intl-en"},
+			},
+			DocsURL: "https://www.tencentcloud.com/document/product/1013/33464",
+		},
+		"sentry-cli": {
+			ID:            "sentry-cli",
+			Tool:          "Sentry CLI",
+			Binary:        "sentry-cli",
+			Aliases:       []string{"sentry"},
+			Providers:     []string{"Sentry"},
+			VerifyCommand: "sentry-cli --version",
+			InstallCommands: map[string][]string{
+				"darwin":  {"brew install getsentry/tools/sentry-cli"},
+				"linux":   {"curl -sL https://sentry.io/get-cli/ | bash"},
+				"windows": {"npm install -g @sentry/cli"},
+			},
+			DocsURL: "https://docs.sentry.io/cli/installation/",
+		},
 	}
 }
 
@@ -410,7 +452,7 @@ func Install(ctx context.Context, opts InstallOptions) InstallResult {
 				break
 			}
 		}
-		if _, err := exec.LookPath(guide.Binary); err == nil {
+		if _, err := findToolGuideBinary(guide); err == nil {
 			toolResult.Installed = true
 		}
 		result.Results = append(result.Results, toolResult)
@@ -535,6 +577,16 @@ func AuthGuides() map[string]AuthGuide {
 			EnvVars:       []string{"HCLOUD_TOKEN", "HETZNER_API_TOKEN"},
 			DocsURL:       "https://github.com/hetznercloud/cli",
 		},
+		"oracle": {
+			ID:            "oracle",
+			Provider:      "Oracle Cloud Infrastructure",
+			Purpose:       "Configure an OCI CLI profile with an API signing key, then provide the tenancy or compartment OCID Clanker should inspect.",
+			LoginCommands: []string{"oci setup config", "oci iam compartment list --access-level ACCESSIBLE --compartment-id <tenancy-ocid> --compartment-id-in-subtree true --all"},
+			EnvVars:       []string{"OCI_CLI_PROFILE", "OCI_CLI_CONFIG_FILE", "OCI_TENANCY_OCID", "OCI_COMPARTMENT_ID"},
+			DocsURL:       "https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliconfigure.htm",
+			TokenURL:      "https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm",
+			Notes:         []string{"Clanker uses local OCI CLI profiles; do not paste OCI private keys into chat."},
+		},
 		"kubernetes": {
 			ID:            "kubernetes",
 			Provider:      "Kubernetes",
@@ -591,8 +643,8 @@ func AuthGuides() map[string]AuthGuide {
 		"tencent": {
 			ID:            "tencent",
 			Provider:      "Tencent Cloud",
-			Purpose:       "Create a Tencent Cloud SecretId/SecretKey pair for direct Tencent API access. Prefer sub-user credentials scoped to the services Clanker should inspect.",
-			LoginCommands: []string{},
+			Purpose:       "Install tccli, then configure a Tencent Cloud SecretId/SecretKey pair. Prefer sub-user credentials scoped to the services Clanker should inspect.",
+			LoginCommands: []string{"tccli configure"},
 			EnvVars:       []string{"TENCENTCLOUD_SECRET_ID", "TENCENTCLOUD_SECRET_KEY", "TENCENTCLOUD_REGION", "TENCENT_SECRET_ID", "TENCENT_SECRET_KEY", "TENCENT_REGION"},
 			DocsURL:       "https://www.tencentcloud.com/document/product/214/1526",
 			TokenURL:      "https://www.tencentcloud.com/document/product/598/32675",
@@ -609,8 +661,8 @@ func AuthGuides() map[string]AuthGuide {
 		"sentry": {
 			ID:            "sentry",
 			Provider:      "Sentry",
-			Purpose:       "Create an official Sentry auth token and provide the org slug for issues, releases, monitors, and alert management.",
-			LoginCommands: []string{},
+			Purpose:       "Install the official Sentry CLI or create an auth token, then provide the org slug for issues, releases, monitors, and alert management.",
+			LoginCommands: []string{"sentry-cli login", "sentry auth login"},
 			EnvVars:       []string{"SENTRY_AUTH_TOKEN", "SENTRY_ORG", "SENTRY_HOST"},
 			DocsURL:       "https://docs.sentry.io/api/auth/",
 			TokenURL:      "https://docs.sentry.io/api/guides/create-auth-token/",
@@ -650,22 +702,20 @@ func scanTools(ctx context.Context) map[string]ToolStatus {
 			ID:              guide.ID,
 			Tool:            guide.Tool,
 			Binary:          guide.Binary,
+			Aliases:         append([]string(nil), guide.Aliases...),
 			Providers:       append([]string(nil), guide.Providers...),
 			VerifyCommand:   guide.VerifyCommand,
 			InstallCommands: installCommandsForOS(guide),
 			AllCommands:     guide.InstallCommands,
 			DocsURL:         guide.DocsURL,
 		}
-		path, err := exec.LookPath(guide.Binary)
-		if key == "flyctl" && err != nil {
-			path, err = exec.LookPath("flyctl")
-		}
+		path, err := findToolGuideBinary(guide)
 		if err == nil {
 			status.Installed = true
 			status.Path = path
-			status.Version = detectVersion(ctx, guide)
+			status.Version = detectVersion(ctx, guide, path)
 		} else {
-			status.Message = guide.Binary + " not found in PATH"
+			status.Message = strings.Join(toolGuideBinaries(guide), " or ") + " not found in PATH"
 		}
 		result[key] = status
 	}
@@ -736,7 +786,7 @@ func providerGuides() []providerGuide {
 			if hasAnyEnv("CLOUDFLARE_API_TOKEN", "CF_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID") {
 				notes = append(notes, "cloudflare env")
 			}
-			if fileExists(homePath(".wrangler", "config", "default.toml")) {
+			if fileExistsAny(wranglerConfigPaths()...) {
 				notes = append(notes, "wrangler config")
 			}
 			return len(notes) > 0, len(notes) > 0, notes
@@ -758,6 +808,16 @@ func providerGuides() []providerGuide {
 			}
 			if fileExists(homePath(".config", "hcloud", "cli.toml")) {
 				notes = append(notes, "hcloud config")
+			}
+			return len(notes) > 0, len(notes) > 0, notes
+		}},
+		{ID: "oracle", Name: "Oracle Cloud", RequiredTools: []string{"oci"}, Detect: func() (bool, bool, []string) {
+			notes := []string{}
+			if hasAnyEnv("OCI_CLI_PROFILE", "OCI_CLI_CONFIG_FILE", "OCI_TENANCY_OCID", "OCI_TENANCY_ID", "OCI_COMPARTMENT_ID") {
+				notes = append(notes, "oracle env")
+			}
+			if fileExists(homePath(".oci", "config")) {
+				notes = append(notes, "oci config")
 			}
 			return len(notes) > 0, len(notes) > 0, notes
 		}},
@@ -806,7 +866,7 @@ func providerGuides() []providerGuide {
 			if hasAnyEnv("VERCEL_TOKEN") {
 				notes = append(notes, "vercel env")
 			}
-			if fileExists(homePath(".vercel", "auth.json")) {
+			if fileExistsAny(vercelAuthPaths()...) {
 				notes = append(notes, "vercel auth")
 			}
 			return len(notes) > 0, len(notes) > 0, notes
@@ -821,7 +881,7 @@ func providerGuides() []providerGuide {
 			}
 			return len(notes) > 0, len(notes) > 0, notes
 		}},
-		{ID: "tencent", Name: "Tencent Cloud", RequiredTools: []string{}, Detect: func() (bool, bool, []string) {
+		{ID: "tencent", Name: "Tencent Cloud", RequiredTools: []string{"tccli"}, Detect: func() (bool, bool, []string) {
 			notes := []string{}
 			if hasAnyEnv("TENCENTCLOUD_SECRET_ID", "TENCENTCLOUD_SECRET_KEY", "TENCENT_SECRET_ID", "TENCENT_SECRET_KEY") {
 				notes = append(notes, "tencent env")
@@ -838,7 +898,7 @@ func providerGuides() []providerGuide {
 			}
 			return len(notes) > 0, len(notes) > 0, notes
 		}},
-		{ID: "sentry", Name: "Sentry", RequiredTools: []string{}, Detect: func() (bool, bool, []string) {
+		{ID: "sentry", Name: "Sentry", RequiredTools: []string{"sentry-cli"}, Detect: func() (bool, bool, []string) {
 			notes := []string{}
 			if hasAnyEnv("SENTRY_AUTH_TOKEN", "SENTRY_ORG", "SENTRY_HOST") {
 				notes = append(notes, "sentry env")
@@ -931,6 +991,8 @@ func normalizeToolID(raw string) string {
 		return "doctl"
 	case "hetzner":
 		return "hcloud"
+	case "oracle", "oracle cloud", "oracle-cloud", "oracle cloud infrastructure", "oracle-cloud-infrastructure", "oci-cli":
+		return "oci"
 	case "railway":
 		return "railway"
 	case "supabase":
@@ -941,6 +1003,10 @@ func normalizeToolID(raw string) string {
 		return "gh"
 	case "fly", "flyio", "fly.io":
 		return "flyctl"
+	case "tencent", "tencent cloud", "tencent-cloud", "tencentcloud", "tccli":
+		return "tccli"
+	case "sentry", "sentry-cli", "sentrycli":
+		return "sentry-cli"
 	default:
 		return value
 	}
@@ -960,17 +1026,13 @@ func normalizeSet(values []string) map[string]bool {
 	return result
 }
 
-func detectVersion(ctx context.Context, guide ToolGuide) string {
+func detectVersion(ctx context.Context, guide ToolGuide, binaryPath string) string {
 	parts := strings.Fields(guide.VerifyCommand)
 	if len(parts) == 0 {
 		return ""
 	}
-	if guide.ID == "flyctl" {
-		if _, err := exec.LookPath(parts[0]); err != nil {
-			if _, fallbackErr := exec.LookPath("flyctl"); fallbackErr == nil {
-				parts[0] = "flyctl"
-			}
-		}
+	if strings.TrimSpace(binaryPath) != "" {
+		parts[0] = binaryPath
 	}
 	versionCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -984,6 +1046,32 @@ func detectVersion(ctx context.Context, guide ToolGuide) string {
 		return ""
 	}
 	return strings.TrimSpace(lines[0])
+}
+
+func findToolGuideBinary(guide ToolGuide) (string, error) {
+	for _, binary := range toolGuideBinaries(guide) {
+		if path, err := exec.LookPath(binary); err == nil {
+			return path, nil
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+func toolGuideBinaries(guide ToolGuide) []string {
+	binaries := []string{}
+	seen := map[string]bool{}
+	for _, binary := range append([]string{guide.Binary}, guide.Aliases...) {
+		binary = strings.TrimSpace(binary)
+		if binary == "" || seen[binary] {
+			continue
+		}
+		seen[binary] = true
+		binaries = append(binaries, binary)
+	}
+	if guide.ID == "flyctl" && !seen["flyctl"] {
+		binaries = append(binaries, "flyctl")
+	}
+	return binaries
 }
 
 func installCommandsForOS(guide ToolGuide) []string {
@@ -1041,6 +1129,72 @@ func fileExists(path string) bool {
 	}
 	st, err := os.Stat(path)
 	return err == nil && !st.IsDir()
+}
+
+func fileExistsAny(paths ...string) bool {
+	for _, path := range paths {
+		if fileExists(path) {
+			return true
+		}
+	}
+	return false
+}
+
+// vercelAuthPaths lists the auth.json locations used by the Vercel CLI: the
+// legacy ~/.vercel directory and the platform data directory newer releases
+// write to (macOS: ~/Library/Application Support/com.vercel.cli, Linux:
+// $XDG_DATA_HOME/com.vercel.cli, Windows: %AppData%/com.vercel.cli).
+func vercelAuthPaths() []string {
+	paths := []string{homePath(".vercel", "auth.json")}
+	switch runtime.GOOS {
+	case "darwin":
+		paths = append(paths, homePath("Library", "Application Support", "com.vercel.cli", "auth.json"))
+	case "windows":
+		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
+			paths = append(paths, filepath.Join(appData, "com.vercel.cli", "auth.json"))
+		}
+	default:
+		paths = append(paths, filepath.Join(xdgDataHome(), "com.vercel.cli", "auth.json"))
+	}
+	return paths
+}
+
+// wranglerConfigPaths lists the global config locations used by Wrangler:
+// $WRANGLER_HOME when set, the legacy ~/.wrangler directory, and the platform
+// config directory newer releases use when ~/.wrangler is absent (macOS:
+// ~/Library/Preferences/.wrangler, Linux: $XDG_CONFIG_HOME/.wrangler,
+// Windows: %AppData%/.wrangler).
+func wranglerConfigPaths() []string {
+	paths := []string{}
+	if custom := strings.TrimSpace(os.Getenv("WRANGLER_HOME")); custom != "" {
+		paths = append(paths, filepath.Join(custom, "config", "default.toml"))
+	}
+	paths = append(paths, homePath(".wrangler", "config", "default.toml"))
+	switch runtime.GOOS {
+	case "darwin":
+		paths = append(paths, homePath("Library", "Preferences", ".wrangler", "config", "default.toml"))
+	case "windows":
+		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
+			paths = append(paths, filepath.Join(appData, ".wrangler", "config", "default.toml"))
+		}
+	default:
+		paths = append(paths, filepath.Join(xdgConfigHome(), ".wrangler", "config", "default.toml"))
+	}
+	return paths
+}
+
+func xdgConfigHome() string {
+	if dir := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); dir != "" {
+		return dir
+	}
+	return homePath(".config")
+}
+
+func xdgDataHome() string {
+	if dir := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); dir != "" {
+		return dir
+	}
+	return homePath(".local", "share")
 }
 
 func truncate(value string, max int) string {
