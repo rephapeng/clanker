@@ -1506,6 +1506,106 @@ func (c *Client) resolveGitHubModelsToken(ctx context.Context) string {
 	return strings.TrimSpace(string(output))
 }
 
+// normalizeGitHubModelsModel maps bare model names to the publisher-qualified ids the
+// GitHub Models API requires ("gpt-5.4" -> "openai/gpt-5.4"); already-qualified ids and
+// unknown families pass through untouched.
+func normalizeGitHubModelsModel(raw string) string {
+	model := strings.TrimSpace(raw)
+	if model == "" {
+		return ""
+	}
+	if strings.Contains(model, "/") {
+		return model
+	}
+	switch {
+	case strings.HasPrefix(model, "gpt-"):
+		return "openai/" + model
+	case strings.HasPrefix(model, "claude-"):
+		return "anthropic/" + model
+	case strings.HasPrefix(model, "gemini-"):
+		return "google/" + model
+	default:
+		return model
+	}
+}
+
+type gitHubCatalogModel struct {
+	ID                        string   `json:"id"`
+	SupportedInputModalities  []string `json:"supported_input_modalities"`
+	SupportedOutputModalities []string `json:"supported_output_modalities"`
+}
+
+func containsTextModality(values []string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), "text") {
+			return true
+		}
+	}
+	return false
+}
+
+func pickGitHubCatalogModel(catalog []gitHubCatalogModel) (string, error) {
+	for _, model := range catalog {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+		if !containsTextModality(model.SupportedInputModalities) || !containsTextModality(model.SupportedOutputModalities) {
+			continue
+		}
+		return id, nil
+	}
+	for _, model := range catalog {
+		if id := strings.TrimSpace(model.ID); id != "" {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("github models catalog returned no usable models")
+}
+
+// resolveDefaultGitHubModelsModel asks the live catalog for the first text-in/text-out
+// model instead of pinning a hardcoded default that ages out from under users.
+func resolveDefaultGitHubModelsModel(ctx context.Context, token string) (string, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://models.github.ai/catalog/models", nil)
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("X-GitHub-Api-Version", "2026-03-10")
+
+	client := &http.Client{Timeout: aiHTTPClientTimeout}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+		return "", fmt.Errorf("github models catalog failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var catalog []gitHubCatalogModel
+	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+		return "", err
+	}
+	return pickGitHubCatalogModel(catalog)
+}
+
+// githubModelsModelForCall resolves the model for one GitHub Models call: normalize the
+// configured name, or fall back to the live catalog default, or (catalog unreachable)
+// the legacy pinned model so an offline catalog never breaks calls outright.
+func githubModelsModelForCall(ctx context.Context, configured, token string) string {
+	if model := normalizeGitHubModelsModel(configured); model != "" {
+		return model
+	}
+	if model, err := resolveDefaultGitHubModelsModel(ctx, token); err == nil {
+		return model
+	}
+	return "openai/gpt-5.4"
+}
+
 func (c *Client) askGitHubModels(ctx context.Context, prompt string) (string, error) {
 	profileLLMCall, err := c.getAIProfile(c.aiProfile)
 	if err != nil {
@@ -1517,10 +1617,7 @@ func (c *Client) askGitHubModels(ctx context.Context, prompt string) (string, er
 		return "", fmt.Errorf("GitHub auth token not configured; run 'gh auth login' or provide a token with models access")
 	}
 
-	model := strings.TrimSpace(profileLLMCall.Model)
-	if model == "" {
-		model = "openai/gpt-5.4"
-	}
+	model := githubModelsModelForCall(ctx, profileLLMCall.Model, token)
 	emitProgressTrace("provider", fmt.Sprintf("Calling GitHub Models with model %s.", model))
 
 	reqBody := OpenAIRequest{
@@ -2636,16 +2733,13 @@ func (c *Client) askGitHubModelsWithHistory(ctx context.Context, conv *Conversat
 		return "", fmt.Errorf("failed to get AI profile: %w", err)
 	}
 
-	model := strings.TrimSpace(profileLLMCall.Model)
-	if model == "" {
-		model = "openai/gpt-5.4"
-	}
-	emitProgressTrace("provider", fmt.Sprintf("Calling GitHub Models with model %s.", model))
-
 	token := c.resolveGitHubModelsToken(ctx)
 	if token == "" {
 		return "", fmt.Errorf("GitHub auth token not configured; run 'gh auth login' or provide a token with models access")
 	}
+
+	model := githubModelsModelForCall(ctx, profileLLMCall.Model, token)
+	emitProgressTrace("provider", fmt.Sprintf("Calling GitHub Models with model %s.", model))
 
 	reqBody := OpenAIRequest{Model: model, Messages: messages}
 	if v := viper.GetStringMap("ai.providers.openai.chat_template_kwargs"); len(v) > 0 {
@@ -3107,11 +3201,12 @@ func (c *Client) githubModelsActiveModel() string {
 		return ""
 	}
 
-	model := strings.TrimSpace(profileLLMCall.Model)
-	if model == "" {
-		return "openai/gpt-5.4"
+	// No ctx/token here, so this display-oriented getter normalizes only; the pinned
+	// name remains the last-resort label when no model is configured.
+	if model := normalizeGitHubModelsModel(profileLLMCall.Model); model != "" {
+		return model
 	}
-	return model
+	return "openai/gpt-5.4"
 }
 
 // summarizeContextIfNeeded reduces context size by chunking and summarizing when it exceeds limits
