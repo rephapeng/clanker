@@ -39,7 +39,7 @@ services:
       - --local-model-inference-url=${VLLM_BASE_URL}
       - --no-thinking
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:47180/api/v1/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:47180/api/v1/health"]
       interval: 10s
       timeout: 3s
       retries: 5
