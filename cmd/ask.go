@@ -204,6 +204,24 @@ Examples:
 				})
 			}
 			decision := determineRoutingDecisionDetailsWithContext(question, dbConnection)
+			// Opt-in LLM classification (--ai-router or ai.route_classifier: llm). The
+			// keyword decision above stays the authority whenever the model call fails,
+			// returns junk, or names an agent outside the routing vocabulary.
+			aiRouter, _ := cmd.Flags().GetBool("ai-router")
+			if !aiRouter {
+				aiRouter = strings.EqualFold(strings.TrimSpace(viper.GetString("ai.route_classifier")), "llm")
+			}
+			if aiRouter {
+				if aiDecision, ok := determineRoutingDecisionDetailsWithAI(
+					context.Background(),
+					question,
+					aiProfile,
+					openaiKey, anthropicKey, geminiKey, deepseekKey, cohereKey, minimaxKey,
+					debug,
+				); ok {
+					decision = aiDecision
+				}
+			}
 			result := map[string]string{
 				"agent":  decision.Agent,
 				"reason": decision.Reason,
@@ -1555,6 +1573,7 @@ func init() {
 	askCmd.Flags().Bool("apply", false, "Apply an approved maker plan (reads from stdin unless --plan-file is provided)")
 	askCmd.Flags().String("plan-file", "", "Optional path to maker plan JSON file for --apply")
 	askCmd.Flags().Bool("route-only", false, "Return routing decision as JSON without executing (for backend integration)")
+	askCmd.Flags().Bool("ai-router", false, "Classify --route-only decisions with the configured AI provider (opt-in; falls back to keyword routing on any failure)")
 	askCmd.Flags().String("agent", "", "Use a specific agent to handle the query (e.g., hermes, claude-code, database, cicd, observability, software-blocks, data_flow, copilot, codex, claude)")
 	askCmd.Flags().String("github-coding-agent-model", "", "Override the Copilot CLI model used for GitHub coding-agent delegation")
 }
@@ -3695,6 +3714,140 @@ type routingDecisionDetails struct {
 	Agent        string
 	Reason       string
 	DatabaseMode string
+}
+
+// The LLM route classifier's vocabulary. This MUST stay in lockstep with the agents
+// determineRoutingDecisionDetailsWithContext can return — an agent missing here silently
+// falls back to keyword routing, and one missing there would emit an agent no consumer
+// handles. cmd/ask_route_classifier_test.go pins the correspondence.
+var routeClassifierAgents = map[string]bool{
+	"clanker-cloud":       true,
+	"hermes":              true,
+	"iam":                 true,
+	"terraform":           true,
+	"diagram":             true,
+	"k8s-maker":           true,
+	"maker":               true,
+	"k8s":                 true,
+	"agent-database":      true,
+	"agent-observability": true,
+	"agent-cicd":          true,
+	"cli":                 true,
+}
+
+const routeOnlySystemPrompt = `You are a routing classifier for Clanker.
+
+Return exactly one target as JSON with fields 'agent' and 'reason'.
+
+Valid agents:
+- clanker-cloud: explicit requests to open or use the Clanker Cloud desktop app.
+- hermes: explicit requests for the Hermes agent.
+- iam: IAM queries, role/policy analysis, security posture questions.
+- terraform: Terraform workspace queries, plan/state analysis.
+- diagram: diagram-only or visualization requests with no real infra changes.
+- k8s-maker: requests to create, modify, scale, or delete Kubernetes resources.
+- maker: requests to create, modify, deploy, scale, wire, or delete other real cloud infrastructure.
+- k8s: Kubernetes questions, status, or analysis without changes.
+- agent-database: database queries, inventory, or analysis.
+- agent-observability: logs, traces, metrics, alerts, errors, crashes, and warning investigations.
+- agent-cicd: CI/CD pipelines, builds, releases, and deployment workflow questions.
+- cli: everything else — infrastructure questions, status, troubleshooting, advisory guidance.
+
+Rules:
+- Real infra/resource changes go to maker (or k8s-maker for Kubernetes).
+- Questions, analysis, status, and logs go to the matching read-only agent.
+- If uncertain, choose cli.
+
+Respond strictly as JSON, nothing else.`
+
+type routeDecision struct {
+	Agent  string `json:"agent"`
+	Reason string `json:"reason"`
+}
+
+func parseRouteDecision(raw string) (routeDecision, error) {
+	trimmed := strings.TrimSpace(raw)
+	// Models fond of markdown wrap the JSON in fences; take the outermost object.
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start < 0 || end <= start {
+		return routeDecision{}, fmt.Errorf("no JSON object in route classification: %q", trimmed)
+	}
+	var parsed routeDecision
+	if err := json.Unmarshal([]byte(trimmed[start:end+1]), &parsed); err != nil {
+		return routeDecision{}, fmt.Errorf("route classification is not valid JSON: %w", err)
+	}
+	parsed.Agent = strings.ToLower(strings.TrimSpace(parsed.Agent))
+	parsed.Reason = strings.TrimSpace(parsed.Reason)
+	if parsed.Agent == "" {
+		return routeDecision{}, fmt.Errorf("route classification named no agent")
+	}
+	return parsed, nil
+}
+
+func resolveRouteClassifierProvider(aiProfile string) string {
+	if strings.TrimSpace(aiProfile) != "" {
+		return strings.TrimSpace(aiProfile)
+	}
+	if provider := strings.TrimSpace(viper.GetString("ai.default_provider")); provider != "" {
+		return provider
+	}
+	return "openai"
+}
+
+func resolveRouteClassifierAPIKey(provider, openaiKey, anthropicKey, geminiKey, deepseekKey, cohereKey, minimaxKey string) string {
+	switch provider {
+	case "gemini", "github-models":
+		return ""
+	case "gemini-api":
+		return resolveGeminiAPIKey(geminiKey)
+	case "openai":
+		return resolveOpenAIKey(openaiKey)
+	case "anthropic":
+		return resolveAnthropicKey(anthropicKey)
+	case "deepseek":
+		return resolveDeepSeekKey(deepseekKey)
+	case "cohere":
+		return resolveCohereKey(cohereKey)
+	case "minimax":
+		return resolveMiniMaxKey(minimaxKey)
+	default:
+		return viper.GetString("ai.api_key")
+	}
+}
+
+// determineRoutingDecisionDetailsWithAI classifies a --route-only question with the
+// configured AI provider. The boolean is false whenever the keyword router should stay
+// authoritative: empty question, provider call failure, unparseable output, or an agent
+// outside the routing vocabulary.
+func determineRoutingDecisionDetailsWithAI(
+	ctx context.Context,
+	question string,
+	aiProfile string,
+	openaiKey, anthropicKey, geminiKey, deepseekKey, cohereKey, minimaxKey string,
+	debug bool,
+) (routingDecisionDetails, bool) {
+	q := routeOnlyUserQuestion(question)
+	if strings.TrimSpace(q) == "" {
+		return routingDecisionDetails{}, false
+	}
+	provider := resolveRouteClassifierProvider(aiProfile)
+	apiKey := resolveRouteClassifierAPIKey(provider, openaiKey, anthropicKey, geminiKey, deepseekKey, cohereKey, minimaxKey)
+	client := ai.NewClient(provider, apiKey, debug, aiProfile)
+	conv := ai.NewConversationContext(routeOnlySystemPrompt)
+	response, err := client.AskWithContext(ctx, conv, "Classify this request for routing and respond with JSON only. Question: "+q)
+	if err != nil {
+		return routingDecisionDetails{}, false
+	}
+	parsed, err := parseRouteDecision(response)
+	if err != nil || !routeClassifierAgents[parsed.Agent] {
+		return routingDecisionDetails{}, false
+	}
+	details := routingDecisionDetails{Agent: parsed.Agent, Reason: parsed.Reason}
+	if parsed.Agent == "agent-database" {
+		details.DatabaseMode = determineDatabaseRouteMode(strings.ToLower(q))
+	}
+	return details, true
 }
 
 func determineDatabaseRouteMode(questionLower string) string {
